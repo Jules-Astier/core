@@ -350,7 +350,7 @@ export class ApiSportsProvider extends BaseProvider implements LiveProvider {
             ...event.providers
                 .filter((provider) => provider.providerId === this.id)
                 .flatMap((provider) =>
-                    [provider.internalEventId, provider.href].filter(
+                    [provider.internalEventId, provider.href, ...(provider.hrefs ?? [])].filter(
                         (value): value is string => Boolean(value)
                     )
                 )

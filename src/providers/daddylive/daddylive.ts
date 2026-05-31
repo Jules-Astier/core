@@ -16,6 +16,22 @@ type DiscoveryContext = Partial<ProviderLiveEventCandidate> & {
     dateLabel?: string;
 };
 
+type DaddyLiveScheduleRow = {
+    title: string;
+    league?: string;
+    sport?: string;
+    startsAt?: string;
+    teams?: ProviderLiveEventCandidate['teams'];
+    internalEventId: string;
+    hrefs: string[];
+    sourceCount: number;
+};
+
+type ScheduleRowsCache = {
+    expiresAt: number;
+    rows: DaddyLiveScheduleRow[];
+};
+
 type AuthorizedSource = {
     url: string;
     type?: Source['type'];
@@ -36,6 +52,11 @@ const SOURCE_TYPES: Source['type'][] = [
     'embed'
 ];
 
+const DEFAULT_SCHEDULE_CACHE_TTL_SECONDS = 15 * 60;
+const DEFAULT_MATCH_MIN_SCORE = 0.45;
+const DEFAULT_MATCH_TIME_WINDOW_HOURS = 18;
+const DEFAULT_PLAYWRIGHT_TIMEOUT_MS = 20_000;
+
 export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     readonly id = 'daddylive';
     readonly name = 'DaddyLive';
@@ -54,6 +75,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         supportedContentTypes: ['live']
     };
 
+    private scheduleRowsCache?: ScheduleRowsCache;
+    private scheduleRowsPromise?: Promise<DaddyLiveScheduleRow[]>;
+
     async getMovieSources(): Promise<ProviderResult> {
         return this.emptyResult('DaddyLive only supports live events.');
     }
@@ -63,26 +87,45 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     async getLiveEvents(): Promise<ProviderLiveEventCandidate[]> {
-        const url = this.scheduleUrl();
-        if (!url) {
+        if (process.env.DADDYLIVE_DISCOVERY_ENABLED !== 'true') {
             return [];
         }
 
-        const response = await fetch(url, {
-            headers: this.HEADERS
-        });
-
-        if (!response.ok) {
-            throw new Error(`DaddyLive schedule failed with ${response.status}`);
-        }
-
-        const body = await response.text();
-        const contentType = response.headers.get('content-type') ?? '';
-        const events = contentType.includes('json') || this.looksLikeJson(body)
-            ? this.eventsFromJson(JSON.parse(body))
-            : this.eventsFromHtml(body, url);
+        const events = (await this.loadScheduleRows()).map((row) => this.candidateFromScheduleRow(row));
 
         return this.dedupeEvents(events);
+    }
+
+    async matchLiveEvent(event: LiveEventManifest): Promise<ProviderLiveEventCandidate | undefined> {
+        const rows = await this.loadScheduleRows();
+        let best: { row: DaddyLiveScheduleRow; score: number } | undefined;
+
+        for (const row of rows) {
+            if (!row.hrefs.length) {
+                continue;
+            }
+
+            const score = this.matchScore(event, row);
+            if (!best || score > best.score) {
+                best = { row, score };
+            }
+        }
+
+        const minimumScore = this.numberEnv('DADDYLIVE_MATCH_MIN_SCORE', DEFAULT_MATCH_MIN_SCORE);
+        if (!best || best.score < minimumScore) {
+            return undefined;
+        }
+
+        return {
+            ...this.candidateFromScheduleRow(best.row),
+            title: event.title,
+            league: event.league,
+            sport: event.sport,
+            startsAt: event.startsAt,
+            endsAt: event.endsAt,
+            status: event.status,
+            teams: event.teams ?? best.row.teams
+        };
     }
 
     async getLiveEventSources(event: LiveEventManifest): Promise<ProviderResult> {
@@ -119,6 +162,123 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
 
     private scheduleUrl(): string | undefined {
         return process.env.DADDYLIVE_SCHEDULE_URL?.trim() || undefined;
+    }
+
+    private async loadScheduleRows(): Promise<DaddyLiveScheduleRow[]> {
+        const now = Date.now();
+        if (this.scheduleRowsCache && this.scheduleRowsCache.expiresAt > now) {
+            return this.scheduleRowsCache.rows;
+        }
+
+        if (!this.scheduleRowsPromise) {
+            this.scheduleRowsPromise = this.fetchScheduleRows();
+        }
+
+        try {
+            const rows = await this.scheduleRowsPromise;
+            this.scheduleRowsCache = {
+                rows,
+                expiresAt: now + this.numberEnv('DADDYLIVE_SCHEDULE_CACHE_TTL_SECONDS', DEFAULT_SCHEDULE_CACHE_TTL_SECONDS) * 1000
+            };
+            return rows;
+        } finally {
+            this.scheduleRowsPromise = undefined;
+        }
+    }
+
+    private async fetchScheduleRows(): Promise<DaddyLiveScheduleRow[]> {
+        const url = this.scheduleUrl();
+        if (!url) {
+            return [];
+        }
+
+        const payload = await this.fetchSchedulePayload(url);
+        const events = payload.contentType.includes('json') || this.looksLikeJson(payload.body)
+            ? this.eventsFromJson(JSON.parse(payload.body))
+            : this.eventsFromHtml(payload.body, url);
+
+        return this.dedupeScheduleRows(events.map((event) => this.scheduleRowFromCandidate(event)));
+    }
+
+    private async fetchSchedulePayload(url: string): Promise<{ body: string; contentType: string }> {
+        if (process.env.DADDYLIVE_RENDER_WITH_PLAYWRIGHT === 'true') {
+            return {
+                body: await this.renderWithPlaywright(url),
+                contentType: 'text/html'
+            };
+        }
+
+        const response = await fetch(url, {
+            headers: this.HEADERS
+        });
+
+        if (!response.ok) {
+            throw new Error(`DaddyLive schedule failed with ${response.status}`);
+        }
+
+        return {
+            body: await response.text(),
+            contentType: response.headers.get('content-type') ?? ''
+        };
+    }
+
+    private async renderWithPlaywright(url: string): Promise<string> {
+        const packageName = 'playwright';
+        const timeout = this.numberEnv('DADDYLIVE_PLAYWRIGHT_TIMEOUT_MS', DEFAULT_PLAYWRIGHT_TIMEOUT_MS);
+
+        try {
+            const { chromium } = await import(packageName);
+            const browser = await chromium.launch({
+                headless: true,
+                executablePath: process.env.DADDYLIVE_BROWSER_EXECUTABLE_PATH
+            });
+            const page = await browser.newPage({
+                userAgent: this.HEADERS['User-Agent']
+            });
+
+            try {
+                await page.goto(url, {
+                    waitUntil: 'networkidle',
+                    timeout
+                });
+                return await page.content();
+            } finally {
+                await browser.close();
+            }
+        } catch (error) {
+            throw new Error(
+                `DaddyLive Playwright rendering failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+            );
+        }
+    }
+
+    private candidateFromScheduleRow(row: DaddyLiveScheduleRow): ProviderLiveEventCandidate {
+        return {
+            providerId: this.id,
+            internalEventId: row.internalEventId,
+            title: row.title,
+            league: row.league ?? process.env.DADDYLIVE_DEFAULT_LEAGUE ?? 'live',
+            sport: row.sport ?? process.env.DADDYLIVE_DEFAULT_SPORT ?? 'live',
+            startsAt: row.startsAt,
+            teams: row.teams,
+            href: row.hrefs[0],
+            hrefs: row.hrefs,
+            sourceCount: row.sourceCount
+        };
+    }
+
+    private scheduleRowFromCandidate(candidate: ProviderLiveEventCandidate): DaddyLiveScheduleRow {
+        const hrefs = this.unique([candidate.href, ...(candidate.hrefs ?? [])]);
+        return {
+            title: candidate.title,
+            league: candidate.league,
+            sport: candidate.sport,
+            startsAt: candidate.startsAt,
+            teams: candidate.teams,
+            internalEventId: candidate.internalEventId ?? hrefs[0] ?? `${candidate.title}:${candidate.startsAt ?? ''}`,
+            hrefs,
+            sourceCount: Math.max(candidate.sourceCount ?? 0, hrefs.length)
+        };
     }
 
     private eventsFromJson(payload: unknown): ProviderLiveEventCandidate[] {
@@ -176,7 +336,8 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             return undefined;
         }
 
-        const href = this.firstString(record, ['href', 'url', 'link']);
+        const hrefs = this.hrefsFromRecord(record);
+        const href = this.firstString(record, ['href', 'url', 'link']) ?? hrefs[0];
         const startsAt = this.parseEventDate(
             this.firstString(record, ['startsAt', 'startAt', 'startTime', 'datetime', 'time']),
             this.firstString(record, ['date', 'eventDate', 'day']) ?? context.dateLabel
@@ -195,26 +356,29 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             startsAt,
             teams: this.teamsFromRecord(record),
             href,
-            sourceCount: this.sourceCountFromRecord(record)
+            hrefs,
+            sourceCount: Math.max(this.sourceCountFromRecord(record), hrefs.length)
         };
     }
 
     private eventsFromHtml(body: string, baseUrl: string): ProviderLiveEventCandidate[] {
         const $ = cheerio.load(body);
-        const selector =
-            process.env.DADDYLIVE_EVENT_SELECTOR ??
-            'a[href], [data-event], [data-event-id], .event, .match, .fixture';
         const events: ProviderLiveEventCandidate[] = [];
+        const rowSelector = process.env.DADDYLIVE_EVENT_ROW_SELECTOR;
+        const rows = rowSelector
+            ? $(rowSelector).toArray()
+            : this.watchLinkRows($);
 
-        $(selector).each((_, element) => {
+        for (const element of rows) {
             const node = $(element);
-            const title = this.cleanText(node.text());
+            const hrefs = this.watchHrefsFromNode($, node, baseUrl);
+            const title = this.titleFromHtmlNode($, node);
             if (!title || title.length < 4) {
-                return;
+                continue;
             }
 
             const hrefValue = node.attr('href') ?? node.attr('data-href') ?? node.attr('data-url');
-            const href = hrefValue ? new URL(hrefValue, baseUrl).toString() : undefined;
+            const href = hrefValue ? this.normalizeHref(hrefValue, baseUrl) : hrefs[0];
             const startsAt = this.parseEventDate(
                 node.attr('data-start') ?? node.attr('data-time') ?? title,
                 node.attr('data-date')
@@ -233,11 +397,80 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
                 sport: process.env.DADDYLIVE_DEFAULT_SPORT ?? 'live',
                 startsAt,
                 href,
-                sourceCount: href ? 1 : 0
+                hrefs,
+                sourceCount: hrefs.length
             });
-        });
+        }
 
         return events;
+    }
+
+    private watchLinkRows($: cheerio.CheerioAPI): any[] {
+        const rowSelector =
+            'tr, li, article, section, .event, .event-row, .match, .match-row, .fixture, .fixture-row, .game, .game-row, .card, .panel, .item, .accordion-item';
+        const rows: any[] = [];
+
+        $('a[href]').each((_, anchor) => {
+            const href = $(anchor).attr('href');
+            if (!href || !this.isWatchHref(href)) {
+                return;
+            }
+
+            const row = $(anchor).closest(rowSelector).get(0) ?? anchor;
+            rows.push(row);
+        });
+
+        return this.uniqueElements(rows);
+    }
+
+    private watchHrefsFromNode(
+        $: cheerio.CheerioAPI,
+        node: cheerio.Cheerio<any>,
+        baseUrl: string
+    ): string[] {
+        const hrefs: string[] = [];
+        const collect = (selection: cheerio.Cheerio<any>) => {
+            selection.each((_, element) => {
+                const href = $(element).attr('href');
+                const normalized = href ? this.normalizeHref(href, baseUrl) : undefined;
+                if (normalized && this.isWatchHref(normalized)) {
+                    hrefs.push(normalized);
+                }
+            });
+        };
+
+        collect(node);
+        collect(node.find('a[href]'));
+        return this.unique(hrefs);
+    }
+
+    private titleFromHtmlNode($: cheerio.CheerioAPI, node: cheerio.Cheerio<any>): string | undefined {
+        const attrs = ['data-event', 'data-title', 'data-name', 'title', 'aria-label'];
+        for (const attr of attrs) {
+            const value = node.attr(attr);
+            if (value) {
+                return this.cleanEventTitle(value);
+            }
+        }
+
+        const heading = node.find('h1,h2,h3,h4,.title,.event-title,.match-title').first().text();
+        if (heading) {
+            return this.cleanEventTitle(heading);
+        }
+
+        let anchorText: string | undefined;
+        node.find('a[href]').each((_, anchor) => {
+            if (anchorText) {
+                return;
+            }
+
+            const text = this.cleanEventTitle($(anchor).text());
+            if (text && !/^watch(?:\s+\d+)?$/i.test(text) && text.length >= 4) {
+                anchorText = text;
+            }
+        });
+
+        return anchorText ?? this.cleanEventTitle(node.text());
     }
 
     private async loadAuthorizedSourceMap(): Promise<AuthorizedSourceMap> {
@@ -260,7 +493,7 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             ...event.providers
                 .filter((provider) => provider.providerId === this.id)
                 .flatMap((provider) =>
-                    [provider.internalEventId, provider.href].filter(
+                    [provider.internalEventId, provider.href, ...(provider.hrefs ?? [])].filter(
                         (value): value is string => Boolean(value)
                     )
                 )
@@ -378,6 +611,59 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         }, 0);
     }
 
+    private hrefsFromRecord(record: JsonRecord): string[] {
+        return this.unique(this.hrefsFromUnknown(record));
+    }
+
+    private hrefsFromUnknown(value: unknown): string[] {
+        if (typeof value === 'string') {
+            return this.isWatchHref(value) ? [value] : [];
+        }
+
+        if (Array.isArray(value)) {
+            return value.flatMap((item) => this.hrefsFromUnknown(item));
+        }
+
+        if (!this.isRecord(value)) {
+            return [];
+        }
+
+        const hrefs: string[] = [];
+        for (const [key, child] of Object.entries(value)) {
+            if (['href', 'url', 'link', 'watch', 'watchUrl'].includes(key)) {
+                hrefs.push(...this.hrefsFromUnknown(child));
+                continue;
+            }
+
+            if (['links', 'streams', 'sources', 'channels'].includes(key)) {
+                hrefs.push(...this.hrefsFromUnknown(child));
+            }
+        }
+
+        return hrefs;
+    }
+
+    private dedupeScheduleRows(rows: DaddyLiveScheduleRow[]): DaddyLiveScheduleRow[] {
+        const byKey = new Map<string, DaddyLiveScheduleRow>();
+        for (const row of rows) {
+            const key = [row.internalEventId, row.title, row.startsAt].filter(Boolean).join(':');
+            const existing = byKey.get(key);
+            if (!existing) {
+                byKey.set(key, row);
+                continue;
+            }
+
+            const hrefs = this.unique([...existing.hrefs, ...row.hrefs]);
+            byKey.set(key, {
+                ...existing,
+                hrefs,
+                sourceCount: Math.max(existing.sourceCount, row.sourceCount, hrefs.length)
+            });
+        }
+
+        return Array.from(byKey.values());
+    }
+
     private contextFromContainerKey(
         key: string,
         context: DiscoveryContext
@@ -412,6 +698,140 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         );
     }
 
+    private matchScore(event: LiveEventManifest, row: DaddyLiveScheduleRow): number {
+        if (row.startsAt && !this.isWithinTimeWindow(event.startsAt, row.startsAt)) {
+            return 0;
+        }
+
+        const textScore = Math.max(
+            ...this.searchQueriesForEvent(event).map((query) => this.textSimilarity(query, row.title))
+        );
+        const teamScore = this.teamMatchScore(event, row);
+        const leagueScore = this.textSimilarity(event.league, row.league ?? row.title);
+        const timeScore = row.startsAt ? 0.15 : 0;
+        return Math.min(1, Math.max(textScore, teamScore) + leagueScore * 0.1 + timeScore);
+    }
+
+    private searchQueriesForEvent(event: LiveEventManifest): string[] {
+        const queries = [event.title];
+        if (event.teams?.away && event.teams.home) {
+            queries.push(`${event.teams.away} vs ${event.teams.home}`);
+            queries.push(`${event.teams.home} vs ${event.teams.away}`);
+        }
+
+        const withoutSession = event.title.replace(/\b(?:practice|qualifying|sprint|race|grand prix)\b/gi, ' ').trim();
+        if (withoutSession && withoutSession !== event.title) {
+            queries.push(withoutSession);
+        }
+
+        return this.unique(queries);
+    }
+
+    private teamMatchScore(event: LiveEventManifest, row: DaddyLiveScheduleRow): number {
+        const home = event.teams?.home;
+        const away = event.teams?.away;
+        if (!home || !away) {
+            return 0;
+        }
+
+        const rowText = this.normalizeSearchText(row.title);
+        return rowText.includes(this.normalizeSearchText(home)) && rowText.includes(this.normalizeSearchText(away))
+            ? 0.95
+            : 0;
+    }
+
+    private textSimilarity(left: string, right: string): number {
+        const leftTokens = this.tokens(left);
+        const rightTokens = this.tokens(right);
+        if (!leftTokens.length || !rightTokens.length) {
+            return 0;
+        }
+
+        const leftText = leftTokens.join(' ');
+        const rightText = rightTokens.join(' ');
+        if (leftText.includes(rightText) || rightText.includes(leftText)) {
+            return 0.9;
+        }
+
+        const rightSet = new Set(rightTokens);
+        const intersection = leftTokens.filter((token) => rightSet.has(token)).length;
+        const union = new Set([...leftTokens, ...rightTokens]).size;
+        return intersection / union;
+    }
+
+    private tokens(value: string): string[] {
+        const stopWords = new Set([
+            'at',
+            'the',
+            'and',
+            'vs',
+            'v',
+            'live',
+            'watch',
+            'link',
+            'stream',
+            'sports',
+            'game'
+        ]);
+        return this.normalizeSearchText(value)
+            .split(' ')
+            .filter((token) => token.length > 1 && !stopWords.has(token));
+    }
+
+    private normalizeSearchText(value: string): string {
+        return value
+            .toLowerCase()
+            .replace(/\bformula\s*(?:1|one)\b/g, 'f1')
+            .replace(/\bgrand\s+prix\b/g, 'gp')
+            .replace(/\bnew york\b/g, 'ny')
+            .replace(/&/g, ' and ')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    private isWithinTimeWindow(left: string, right: string): boolean {
+        const leftTime = new Date(left).getTime();
+        const rightTime = new Date(right).getTime();
+        if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) {
+            return true;
+        }
+
+        const windowMs = this.numberEnv('DADDYLIVE_MATCH_TIME_WINDOW_HOURS', DEFAULT_MATCH_TIME_WINDOW_HOURS) * 60 * 60 * 1000;
+        return Math.abs(leftTime - rightTime) <= windowMs;
+    }
+
+    private normalizeHref(value: string, baseUrl: string): string | undefined {
+        try {
+            return new URL(value, baseUrl).toString();
+        } catch {
+            return undefined;
+        }
+    }
+
+    private isWatchHref(value: string): boolean {
+        const patterns = this.csv(process.env.DADDYLIVE_WATCH_HREF_PATTERNS ?? 'watch.php?id=');
+        const normalized = value.toLowerCase();
+        return patterns.some((pattern) => normalized.includes(pattern.toLowerCase()));
+    }
+
+    private unique(values: Array<string | undefined>): string[] {
+        return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+    }
+
+    private uniqueElements(elements: any[]): any[] {
+        return Array.from(new Set(elements));
+    }
+
+    private numberEnv(name: string, defaultValue: number): number {
+        const value = Number(process.env[name]);
+        return Number.isFinite(value) ? value : defaultValue;
+    }
+
+    private csv(value: string): string[] {
+        return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+    }
+
     private normalizeSourceType(type: Source['type'] | undefined, url: string): Source['type'] {
         if (type && SOURCE_TYPES.includes(type)) {
             return type;
@@ -432,6 +852,18 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
 
     private cleanText(value: string): string {
         return value.replace(/\s+/g, ' ').trim();
+    }
+
+    private cleanEventTitle(value: string): string | undefined {
+        const cleaned = this.cleanText(value)
+            .replace(/\bwatch\b/gi, ' ')
+            .replace(/\blink\s*\d+\b/gi, ' ')
+            .replace(/\bchannel\s*\d+\b/gi, ' ')
+            .replace(/\bhd\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        return cleaned || undefined;
     }
 
     private stripLeadingTime(value: string): string {
