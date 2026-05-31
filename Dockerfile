@@ -14,6 +14,8 @@ FROM node:22-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache chromium
+
 ARG VERSION
 ARG REVISION
 ARG CREATED
@@ -37,6 +39,7 @@ ENV NODE_ENV=${NODE_ENV}
 ENV HOST=0.0.0.0
 ENV PORT=${PORT}
 ENV CACHE_TYPE=${CACHE_TYPE}
+ENV DADDYLIVE_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 COPY package*.json ./
 RUN npm ci --only=production

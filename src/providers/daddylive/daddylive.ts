@@ -223,14 +223,15 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     private async renderWithPlaywright(url: string): Promise<string> {
-        const packageName = 'playwright';
+        const packageName = process.env.DADDYLIVE_PLAYWRIGHT_PACKAGE ?? 'playwright-core';
         const timeout = this.numberEnv('DADDYLIVE_PLAYWRIGHT_TIMEOUT_MS', DEFAULT_PLAYWRIGHT_TIMEOUT_MS);
 
         try {
             const { chromium } = await import(packageName);
             const browser = await chromium.launch({
                 headless: true,
-                executablePath: process.env.DADDYLIVE_BROWSER_EXECUTABLE_PATH
+                executablePath: process.env.DADDYLIVE_BROWSER_EXECUTABLE_PATH,
+                args: ['--no-sandbox', '--disable-dev-shm-usage']
             });
             const page = await browser.newPage({
                 userAgent: this.HEADERS['User-Agent']
