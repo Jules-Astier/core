@@ -72,17 +72,25 @@ jobs:
 
       - name: Test Docker image
         run: |
-          docker run -d --name cinepro-core-test \
+          CONTAINER_ID="$(docker run -d --name cinepro-core-test \
             -p 3000:3000 \
             -e NODE_ENV=production \
             -e HOST=0.0.0.0 \
             -e PORT=3000 \
             -e CACHE_TYPE=memory \
             -e TMDB_API_KEY=dummy-ci-key \
-            cinepro-core:test
-          sleep 10
+            cinepro-core:test)"
+          for attempt in $(seq 1 20); do
+            if [ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER_ID")" = "true" ] &&
+              curl --fail --silent --show-error http://127.0.0.1:3000/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
           docker logs cinepro-core-test
-          curl -sf http://localhost:3000 || true
+          test "$(docker inspect --format '{{.State.Running}}' "$CONTAINER_ID")" = "true"
+          docker exec cinepro-core-test test -r /app/config/provider-catalog.yaml
+          curl --fail --silent --show-error http://127.0.0.1:3000/ >/dev/null
       - name: Cleanup test container
         if: always()
         run: docker rm -f cinepro-core-test || true

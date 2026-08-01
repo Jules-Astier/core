@@ -6,11 +6,17 @@
         "dev": "tsx watch src/server.ts",
         "build": "tsc",
         "start": "npm run build && node dist/server.js",
+        "test": "node scripts/run-tests.mjs && node --test test/provider-catalog.test.mjs",
+        "test:provider": "tsx --test",
+        "test:catalog": "node --test test/provider-catalog.test.mjs",
+        "catalog:validate": "node scripts/validate-provider-catalog.mjs",
+        "catalog:report": "node scripts/generate-provider-report.mjs",
+        "catalog:report:check": "node scripts/generate-provider-report.mjs --check",
         "format": "prettier --write src",
         "clean": "npx rimraf dist"
     },
     "dependencies": {
-        "@omss/framework": "git+https://github.com/Jules-Astier/framework.git#live-events-manifest",
+        "@omss/framework": "git+https://github.com/Jules-Astier/framework.git#39bb47cf231cf40e106bbc0630db7d80ad271ab5",
         "cheerio": "^1.2.0",
         "crypto-js": "^4.2.0",
         "dotenv": "^16.4.5",
@@ -19,6 +25,8 @@
     "devDependencies": {
         "@types/crypto-js": "^4.2.2",
         "@types/node": "^22.7.4",
+        "ajv": "^8.17.1",
+        "ajv-formats": "^3.0.1",
         "prettier": "^3.3.3",
         "tsx": "^4.19.1",
         "typescript": "^5.6.2"

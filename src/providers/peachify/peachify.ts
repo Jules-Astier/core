@@ -13,6 +13,34 @@ import type {
 } from './peachify.types.js';
 import decrypt from './decrypt.js';
 import { generateRandomUserAgent } from '../../utils/ua.js';
+import {
+    createProviderIdentityCatalog,
+    type IdentifiedSource
+} from '../../provider-identity.js';
+import {
+    PEACHIFY_ENABLED_LEAVES,
+    PEACHIFY_FAMILY_ID,
+    PEACHIFY_LEAVES,
+    resolvePeachifyLeaves,
+    type PeachifyLeaf,
+    type PeachifyLeafEnvironment
+} from './peachify.config.js';
+
+const identityCatalog = createProviderIdentityCatalog([
+    { id: PEACHIFY_FAMILY_ID, kind: 'aggregator' },
+    ...PEACHIFY_LEAVES.map(({ id }) => ({
+        id,
+        familyId: PEACHIFY_FAMILY_ID,
+        kind: 'upstream'
+    }))
+]);
+
+export type PeachifyDependencies = {
+    readonly environment?: PeachifyLeafEnvironment;
+    readonly fetch?: typeof fetch;
+    readonly decrypt?: typeof decrypt;
+    readonly userAgent?: () => string;
+};
 
 export class PeachifyProvider extends BaseProvider {
     readonly id = 'Peachify';
@@ -29,18 +57,30 @@ export class PeachifyProvider extends BaseProvider {
         Origin: this.BASE_URL
     };
 
-    readonly PEACHIFY_SERVERS = [
-        `${this.MOVIEBOX_URL}/moviebox`,
-        `${this.API_URL}/holly`,
-        `${this.API_URL}/air`,
-        `${this.API_URL}/multi`,
-        `${this.MOVIEBOX_URL}/net`,
-        `${this.MOVIEBOX_URL}/bmb`
-    ];
+    readonly PEACHIFY_SERVERS: readonly string[];
 
     readonly capabilities: ProviderCapabilities = {
         supportedContentTypes: ['movies', 'tv']
     };
+
+    private readonly leaves: readonly PeachifyLeaf[];
+    private readonly fetchImpl: typeof fetch;
+    private readonly decryptImpl: typeof decrypt;
+    private readonly userAgent: () => string;
+
+    constructor(dependencies: PeachifyDependencies = {}) {
+        super();
+        this.leaves =
+            dependencies.environment === undefined
+                ? PEACHIFY_ENABLED_LEAVES
+                : resolvePeachifyLeaves(dependencies.environment);
+        this.PEACHIFY_SERVERS = Object.freeze(
+            this.leaves.map(({ baseUrl }) => baseUrl)
+        );
+        this.fetchImpl = dependencies.fetch ?? fetch;
+        this.decryptImpl = dependencies.decrypt ?? decrypt;
+        this.userAgent = dependencies.userAgent ?? generateRandomUserAgent;
+    }
 
     async getMovieSources(media: ProviderMediaObject): Promise<ProviderResult> {
         return this.getSources(media);
@@ -59,12 +99,10 @@ export class PeachifyProvider extends BaseProvider {
     private async getSources(
         media: ProviderMediaObject
     ): Promise<ProviderResult> {
-        this.HEADERS['User-Agent'] = generateRandomUserAgent();
+        this.HEADERS['User-Agent'] = this.userAgent();
 
         const results = await Promise.allSettled(
-            this.PEACHIFY_SERVERS.map((server) =>
-                this.fetchFromServer(server, media)
-            )
+            this.leaves.map((leaf) => this.fetchFromServer(leaf, media))
         );
 
         const sources: ProviderResult['sources'] = [];
@@ -91,7 +129,7 @@ export class PeachifyProvider extends BaseProvider {
         if (failCount > 0 && sources.length > 0) {
             diagnostics.push({
                 code: 'PARTIAL_SCRAPE',
-                message: `${failCount} of ${this.PEACHIFY_SERVERS.length} peachify servers failed to respond`,
+                message: `${failCount} of ${this.leaves.length} peachify servers failed to respond`,
                 field: '',
                 severity: 'warning'
             });
@@ -112,20 +150,23 @@ export class PeachifyProvider extends BaseProvider {
      * and maps the raw response into the omss provider result shape.
      */
     private async fetchFromServer(
-        serverBase: string,
+        leaf: PeachifyLeaf,
         media: ProviderMediaObject
     ): Promise<ProviderResult | null> {
+        const serverBase = leaf.baseUrl;
         const apiUrl = this.buildApiUrl(serverBase, media);
         const serverName = new URL(serverBase).hostname;
 
-        const response = await fetch(apiUrl, { headers: this.HEADERS });
+        const response = await this.fetchImpl(apiUrl, {
+            headers: this.HEADERS
+        });
 
         if (!response.ok) return null;
 
         let body = (await response.json()) as PeachifyApiResponse;
 
         if (body.isEncrypted && body.data) {
-            const decrypted = await decrypt(body.data);
+            const decrypted = await this.decryptImpl(body.data);
             if (!decrypted) {
                 return null;
             }
@@ -146,21 +187,26 @@ export class PeachifyProvider extends BaseProvider {
             .map((s) => this.parseSubtitle(s, serverName))
             .filter((s): s is PeachifyParsedSubtitle => s !== null);
 
-        const sources: ProviderResult['sources'] = parsed.map((s) => ({
-            url: this.createProxyUrl(s.url, s.headers ?? this.HEADERS),
-            type: s.type,
-            quality: s.quality?.toString() ?? 'Auto',
-            audioTracks: [
+        const sources: IdentifiedSource[] = parsed.map((s) =>
+            identityCatalog.identifySource(
                 {
-                    label: s.dub,
-                    language: s.dub.toLowerCase().substring(0, 2)
+                    url: this.createProxyUrl(s.url, s.headers ?? this.HEADERS),
+                    type: s.type,
+                    quality: s.quality?.toString() ?? 'Auto',
+                    audioTracks: [
+                        {
+                            label: s.dub,
+                            language: s.dub.toLowerCase().substring(0, 2)
+                        }
+                    ]
+                },
+                {
+                    familyId: PEACHIFY_FAMILY_ID,
+                    upstreamId: leaf.id,
+                    providerName: this.name
                 }
-            ],
-            provider: {
-                id: this.id,
-                name: this.name
-            }
-        }));
+            )
+        );
 
         const subtitles: ProviderResult['subtitles'] = parsedSubs.map((s) => ({
             url: this.createProxyUrl(s.url, this.HEADERS),
@@ -367,7 +413,7 @@ export class PeachifyProvider extends BaseProvider {
             diagnostics: [
                 {
                     code: 'PROVIDER_ERROR',
-                    message: `${this.name}: ${message}`,
+                    message: `${this.name}: ${redactPeachifyDiagnostic(message)}`,
                     field: '',
                     severity: 'error'
                 }
@@ -377,7 +423,7 @@ export class PeachifyProvider extends BaseProvider {
 
     async healthCheck(): Promise<boolean> {
         try {
-            const res = await fetch(this.BASE_URL, {
+            const res = await this.fetchImpl(this.BASE_URL, {
                 method: 'HEAD',
                 headers: this.HEADERS
             });
@@ -386,4 +432,13 @@ export class PeachifyProvider extends BaseProvider {
             return false;
         }
     }
+}
+
+export function redactPeachifyDiagnostic(message: string): string {
+    return message
+        .replace(/\bhttps?:\/\/[^\s"'<>]+/gi, '[redacted-url]')
+        .replace(
+            /([?&](?:token|key|signature|sig|auth)=)[^&\s]+/gi,
+            '$1[redacted]'
+        );
 }

@@ -76,6 +76,13 @@ For Docker, production deployment, and advanced configuration options → **[Qui
 
 Full documentation, API references, configuration guides, and provider development resources are available at **[CinePro Docs](https://docs.cinepro.cc)**.
 
+Provider families, attributed leaves, and embed hosts have independent exact-ID
+allow/deny controls. Invalid or unknown IDs fail startup closed, deny entries
+win over allows, and blank controls preserve catalog defaults. EzVidAPI is
+disabled by default until authorized seeds pass certification. See the
+[provider recheck and rollout runbook](docs/runbooks/provider-recheck.md) and
+[architecture decision index](docs/adr/index.md).
+
 ### Deployment Guides
 
 We recommend running CinePro Core locally for personal use. However, it can also be hosted on a server or cloud platform.

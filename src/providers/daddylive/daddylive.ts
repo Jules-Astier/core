@@ -10,6 +10,10 @@ import type {
 } from '@omss/framework';
 import * as cheerio from 'cheerio';
 import { readFile } from 'node:fs/promises';
+import {
+    WatchPageSourceResolver,
+    type ResolvedWatchSource
+} from './watch-page.resolver.js';
 
 type JsonRecord = Record<string, unknown>;
 type DiscoveryContext = Partial<ProviderLiveEventCandidate> & {
@@ -57,16 +61,56 @@ const DEFAULT_MATCH_MIN_SCORE = 0.45;
 const DEFAULT_MATCH_TIME_WINDOW_HOURS = 18;
 const DEFAULT_PLAYWRIGHT_TIMEOUT_MS = 20_000;
 
+function envValue(...names: string[]): string | undefined {
+    for (const name of names) {
+        const value = process.env[name]?.trim();
+        if (value) {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+function envEnabled(...names: string[]): boolean {
+    return names.some((name) => {
+        const value = process.env[name]?.trim().toLowerCase();
+        return (
+            value === 'true' ||
+            value === '1' ||
+            value === 'yes' ||
+            value === 'on'
+        );
+    });
+}
+
+function envNumber(defaultValue: number, ...names: string[]): number {
+    for (const name of names) {
+        const value = Number(process.env[name]);
+        if (Number.isFinite(value)) {
+            return value;
+        }
+    }
+    return defaultValue;
+}
+
 export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     readonly id = 'daddylive';
     readonly name = 'DaddyLive';
-    readonly enabled = process.env.DADDYLIVE_ENABLED === 'true';
+    readonly enabled = envEnabled(
+        'WATCHPAGE_ENABLED',
+        'LIVE_WATCH_ENABLED',
+        'DADDYLIVE_ENABLED'
+    );
     readonly BASE_URL = this.scheduleUrl()
         ? new URL(this.scheduleUrl()!).origin
         : 'https://daddylive.invalid';
     readonly HEADERS = {
         'User-Agent':
-            process.env.DADDYLIVE_USER_AGENT ??
+            envValue(
+                'WATCHPAGE_USER_AGENT',
+                'LIVE_WATCH_USER_AGENT',
+                'DADDYLIVE_USER_AGENT'
+            ) ??
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150 Safari/537.36',
         Accept: 'text/html,application/json;q=0.9,*/*;q=0.8'
     };
@@ -77,6 +121,7 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
 
     private scheduleRowsCache?: ScheduleRowsCache;
     private scheduleRowsPromise?: Promise<DaddyLiveScheduleRow[]>;
+    private watchResolver?: WatchPageSourceResolver;
 
     async getMovieSources(): Promise<ProviderResult> {
         return this.emptyResult('DaddyLive only supports live events.');
@@ -87,16 +132,26 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     async getLiveEvents(): Promise<ProviderLiveEventCandidate[]> {
-        if (process.env.DADDYLIVE_DISCOVERY_ENABLED !== 'true') {
+        if (
+            !envEnabled(
+                'WATCHPAGE_DISCOVERY_ENABLED',
+                'LIVE_WATCH_DISCOVERY_ENABLED',
+                'DADDYLIVE_DISCOVERY_ENABLED'
+            )
+        ) {
             return [];
         }
 
-        const events = (await this.loadScheduleRows()).map((row) => this.candidateFromScheduleRow(row));
+        const events = (await this.loadScheduleRows()).map((row) =>
+            this.candidateFromScheduleRow(row)
+        );
 
         return this.dedupeEvents(events);
     }
 
-    async matchLiveEvent(event: LiveEventManifest): Promise<ProviderLiveEventCandidate | undefined> {
+    async matchLiveEvent(
+        event: LiveEventManifest
+    ): Promise<ProviderLiveEventCandidate | undefined> {
         const rows = await this.loadScheduleRows();
         let best: { row: DaddyLiveScheduleRow; score: number } | undefined;
 
@@ -111,7 +166,12 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             }
         }
 
-        const minimumScore = this.numberEnv('DADDYLIVE_MATCH_MIN_SCORE', DEFAULT_MATCH_MIN_SCORE);
+        const minimumScore = envNumber(
+            DEFAULT_MATCH_MIN_SCORE,
+            'WATCHPAGE_MATCH_MIN_SCORE',
+            'LIVE_WATCH_MATCH_MIN_SCORE',
+            'DADDYLIVE_MATCH_MIN_SCORE'
+        );
         if (!best || best.score < minimumScore) {
             return undefined;
         }
@@ -128,14 +188,23 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         };
     }
 
-    async getLiveEventSources(event: LiveEventManifest): Promise<ProviderResult> {
+    async getLiveEventSources(
+        event: LiveEventManifest
+    ): Promise<ProviderResult> {
         const sourceMap = await this.loadAuthorizedSourceMap();
         const keys = this.sourceMapKeys(event);
-        const sources = keys.flatMap((key) => sourceMap[key] ?? []);
+        const mappedSources = keys.flatMap((key) => sourceMap[key] ?? []);
+        const resolvedSources = await this.resolveWatchSources(event);
+        const sources = this.dedupeSources([
+            ...mappedSources,
+            ...resolvedSources
+        ]);
 
         if (!sources.length) {
             return this.emptyResult(
-                'Event was discovered from DaddyLive, but no authorized source mapping is configured.'
+                this.sourceResolutionEnabled()
+                    ? 'Event was discovered from DaddyLive, but no authorized source mapping or watch-page source could be resolved.'
+                    : 'Event was discovered from DaddyLive, but no authorized source mapping is configured.'
             );
         }
 
@@ -160,8 +229,74 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         };
     }
 
+    private async resolveWatchSources(
+        event: LiveEventManifest
+    ): Promise<ResolvedWatchSource[]> {
+        if (!this.sourceResolutionEnabled()) {
+            return [];
+        }
+
+        const hrefs = event.providers
+            .filter((provider) => provider.providerId === this.id)
+            .flatMap((provider) => [provider.href, ...(provider.hrefs ?? [])])
+            .filter((href): href is string => Boolean(href));
+
+        if (!hrefs.length) {
+            return [];
+        }
+
+        const resolver = this.getWatchResolver();
+        const results = await Promise.allSettled(
+            this.unique(hrefs).map((href) => resolver.resolveWatchPage(href))
+        );
+
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                this.console.warn(
+                    `Watch-page source resolution failed: ${this.errorMessage(result.reason)}`
+                );
+            }
+        }
+
+        return results.flatMap((result) =>
+            result.status === 'fulfilled' ? result.value : []
+        );
+    }
+
+    private getWatchResolver(): WatchPageSourceResolver {
+        this.watchResolver ??= new WatchPageSourceResolver({
+            baseUrl: envValue(
+                'WATCHPAGE_HEADLESSVIDX_BASE_URL',
+                'LIVE_WATCH_HEADLESSVIDX_BASE_URL',
+                'DADDYLIVE_HEADLESSVIDX_BASE_URL'
+            ),
+            cacheTtlSeconds: envNumber(
+                30,
+                'WATCHPAGE_SOURCE_CACHE_TTL_SECONDS',
+                'LIVE_WATCH_SOURCE_CACHE_TTL_SECONDS',
+                'DADDYLIVE_SOURCE_CACHE_TTL_SECONDS'
+            )
+        });
+
+        return this.watchResolver;
+    }
+
+    private sourceResolutionEnabled(): boolean {
+        return envEnabled(
+            'WATCHPAGE_SOURCE_RESOLUTION_ENABLED',
+            'LIVE_WATCH_SOURCE_RESOLUTION_ENABLED',
+            'DADDYLIVE_SOURCE_RESOLUTION_ENABLED'
+        );
+    }
+
     private scheduleUrl(): string | undefined {
-        return process.env.DADDYLIVE_SCHEDULE_URL?.trim() || undefined;
+        return envValue(
+            'WATCHPAGE_URL',
+            'WATCHPAGE_PAGE_URL',
+            'LIVE_WATCH_PAGE_URL',
+            'LIVE_WATCH_SCHEDULE_URL',
+            'DADDYLIVE_SCHEDULE_URL'
+        );
     }
 
     private async loadScheduleRows(): Promise<DaddyLiveScheduleRow[]> {
@@ -178,7 +313,16 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             const rows = await this.scheduleRowsPromise;
             this.scheduleRowsCache = {
                 rows,
-                expiresAt: now + this.numberEnv('DADDYLIVE_SCHEDULE_CACHE_TTL_SECONDS', DEFAULT_SCHEDULE_CACHE_TTL_SECONDS) * 1000
+                expiresAt:
+                    now +
+                    envNumber(
+                        DEFAULT_SCHEDULE_CACHE_TTL_SECONDS,
+                        'WATCHPAGE_CACHE_TTL_SECONDS',
+                        'WATCHPAGE_SCHEDULE_CACHE_TTL_SECONDS',
+                        'LIVE_WATCH_SCHEDULE_CACHE_TTL_SECONDS',
+                        'DADDYLIVE_SCHEDULE_CACHE_TTL_SECONDS'
+                    ) *
+                        1000
             };
             return rows;
         } finally {
@@ -193,15 +337,27 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         }
 
         const payload = await this.fetchSchedulePayload(url);
-        const events = payload.contentType.includes('json') || this.looksLikeJson(payload.body)
-            ? this.eventsFromJson(JSON.parse(payload.body))
-            : this.eventsFromHtml(payload.body, url);
+        const events =
+            payload.contentType.includes('json') ||
+            this.looksLikeJson(payload.body)
+                ? this.eventsFromJson(JSON.parse(payload.body))
+                : this.eventsFromHtml(payload.body, url);
 
-        return this.dedupeScheduleRows(events.map((event) => this.scheduleRowFromCandidate(event)));
+        return this.dedupeScheduleRows(
+            events.map((event) => this.scheduleRowFromCandidate(event))
+        );
     }
 
-    private async fetchSchedulePayload(url: string): Promise<{ body: string; contentType: string }> {
-        if (process.env.DADDYLIVE_RENDER_WITH_PLAYWRIGHT === 'true') {
+    private async fetchSchedulePayload(
+        url: string
+    ): Promise<{ body: string; contentType: string }> {
+        if (
+            envEnabled(
+                'WATCHPAGE_RENDER_WITH_PLAYWRIGHT',
+                'LIVE_WATCH_RENDER_WITH_PLAYWRIGHT',
+                'DADDYLIVE_RENDER_WITH_PLAYWRIGHT'
+            )
+        ) {
             return {
                 body: await this.renderWithPlaywright(url),
                 contentType: 'text/html'
@@ -213,7 +369,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         });
 
         if (!response.ok) {
-            throw new Error(`DaddyLive schedule failed with ${response.status}`);
+            throw new Error(
+                `DaddyLive schedule failed with ${response.status}`
+            );
         }
 
         return {
@@ -223,14 +381,28 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     private async renderWithPlaywright(url: string): Promise<string> {
-        const packageName = process.env.DADDYLIVE_PLAYWRIGHT_PACKAGE ?? 'playwright-core';
-        const timeout = this.numberEnv('DADDYLIVE_PLAYWRIGHT_TIMEOUT_MS', DEFAULT_PLAYWRIGHT_TIMEOUT_MS);
+        const packageName =
+            envValue(
+                'WATCHPAGE_PLAYWRIGHT_PACKAGE',
+                'LIVE_WATCH_PLAYWRIGHT_PACKAGE',
+                'DADDYLIVE_PLAYWRIGHT_PACKAGE'
+            ) ?? 'playwright-core';
+        const timeout = envNumber(
+            DEFAULT_PLAYWRIGHT_TIMEOUT_MS,
+            'WATCHPAGE_PLAYWRIGHT_TIMEOUT_MS',
+            'LIVE_WATCH_PLAYWRIGHT_TIMEOUT_MS',
+            'DADDYLIVE_PLAYWRIGHT_TIMEOUT_MS'
+        );
 
         try {
             const { chromium } = await import(packageName);
             const browser = await chromium.launch({
                 headless: true,
-                executablePath: process.env.DADDYLIVE_BROWSER_EXECUTABLE_PATH,
+                executablePath: envValue(
+                    'WATCHPAGE_BROWSER_EXECUTABLE_PATH',
+                    'LIVE_WATCH_BROWSER_EXECUTABLE_PATH',
+                    'DADDYLIVE_BROWSER_EXECUTABLE_PATH'
+                ),
                 args: ['--no-sandbox', '--disable-dev-shm-usage']
             });
             const page = await browser.newPage({
@@ -248,18 +420,34 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             }
         } catch (error) {
             throw new Error(
-                `DaddyLive Playwright rendering failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+                `Watch-page Playwright rendering failed: ${error instanceof Error ? error.message : 'Unknown error'}`
             );
         }
     }
 
-    private candidateFromScheduleRow(row: DaddyLiveScheduleRow): ProviderLiveEventCandidate {
+    private candidateFromScheduleRow(
+        row: DaddyLiveScheduleRow
+    ): ProviderLiveEventCandidate {
         return {
             providerId: this.id,
             internalEventId: row.internalEventId,
             title: row.title,
-            league: row.league ?? process.env.DADDYLIVE_DEFAULT_LEAGUE ?? 'live',
-            sport: row.sport ?? process.env.DADDYLIVE_DEFAULT_SPORT ?? 'live',
+            league:
+                row.league ??
+                envValue(
+                    'WATCHPAGE_DEFAULT_LEAGUE',
+                    'LIVE_WATCH_DEFAULT_LEAGUE',
+                    'DADDYLIVE_DEFAULT_LEAGUE'
+                ) ??
+                'live',
+            sport:
+                row.sport ??
+                envValue(
+                    'WATCHPAGE_DEFAULT_SPORT',
+                    'LIVE_WATCH_DEFAULT_SPORT',
+                    'DADDYLIVE_DEFAULT_SPORT'
+                ) ??
+                'live',
             startsAt: row.startsAt,
             teams: row.teams,
             href: row.hrefs[0],
@@ -268,7 +456,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         };
     }
 
-    private scheduleRowFromCandidate(candidate: ProviderLiveEventCandidate): DaddyLiveScheduleRow {
+    private scheduleRowFromCandidate(
+        candidate: ProviderLiveEventCandidate
+    ): DaddyLiveScheduleRow {
         const hrefs = this.unique([candidate.href, ...(candidate.hrefs ?? [])]);
         return {
             title: candidate.title,
@@ -276,7 +466,10 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             sport: candidate.sport,
             startsAt: candidate.startsAt,
             teams: candidate.teams,
-            internalEventId: candidate.internalEventId ?? hrefs[0] ?? `${candidate.title}:${candidate.startsAt ?? ''}`,
+            internalEventId:
+                candidate.internalEventId ??
+                hrefs[0] ??
+                `${candidate.title}:${candidate.startsAt ?? ''}`,
             hrefs,
             sourceCount: Math.max(candidate.sourceCount ?? 0, hrefs.length)
         };
@@ -306,8 +499,14 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
 
         const nextContext: DiscoveryContext = {
             ...context,
-            league: this.firstString(value, ['league', 'competition', 'category']) ?? context.league,
-            sport: this.firstString(value, ['sport', 'sportName']) ?? context.sport
+            league:
+                this.firstString(value, [
+                    'league',
+                    'competition',
+                    'category'
+                ]) ?? context.league,
+            sport:
+                this.firstString(value, ['sport', 'sportName']) ?? context.sport
         };
 
         const candidate = this.candidateFromJsonRecord(value, nextContext);
@@ -330,21 +529,40 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         context: DiscoveryContext
     ): ProviderLiveEventCandidate | undefined {
         const title =
-            this.firstString(record, ['title', 'event', 'name', 'match', 'fixture']) ??
-            this.titleFromTeams(record);
+            this.firstString(record, [
+                'title',
+                'event',
+                'name',
+                'match',
+                'fixture'
+            ]) ?? this.titleFromTeams(record);
 
         if (!title || title.length < 4) {
             return undefined;
         }
 
         const hrefs = this.hrefsFromRecord(record);
-        const href = this.firstString(record, ['href', 'url', 'link']) ?? hrefs[0];
+        const href =
+            this.firstString(record, ['href', 'url', 'link']) ?? hrefs[0];
         const startsAt = this.parseEventDate(
-            this.firstString(record, ['startsAt', 'startAt', 'startTime', 'datetime', 'time']),
-            this.firstString(record, ['date', 'eventDate', 'day']) ?? context.dateLabel
+            this.firstString(record, [
+                'startsAt',
+                'startAt',
+                'startTime',
+                'datetime',
+                'time'
+            ]),
+            this.firstString(record, ['date', 'eventDate', 'day']) ??
+                context.dateLabel
         );
         const internalEventId =
-            this.firstScalar(record, ['id', 'eventId', 'event_id', 'channelId', 'channel_id']) ??
+            this.firstScalar(record, [
+                'id',
+                'eventId',
+                'event_id',
+                'channelId',
+                'channel_id'
+            ]) ??
             href ??
             `${title}:${startsAt ?? ''}`;
 
@@ -352,20 +570,38 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             providerId: this.id,
             internalEventId,
             title,
-            league: this.firstString(record, ['league', 'competition', 'category']) ?? context.league,
-            sport: this.firstString(record, ['sport', 'sportName']) ?? context.sport ?? 'live',
+            league:
+                this.firstString(record, [
+                    'league',
+                    'competition',
+                    'category'
+                ]) ?? context.league,
+            sport:
+                this.firstString(record, ['sport', 'sportName']) ??
+                context.sport ??
+                'live',
             startsAt,
             teams: this.teamsFromRecord(record),
             href,
             hrefs,
-            sourceCount: Math.max(this.sourceCountFromRecord(record), hrefs.length)
+            sourceCount: Math.max(
+                this.sourceCountFromRecord(record),
+                hrefs.length
+            )
         };
     }
 
-    private eventsFromHtml(body: string, baseUrl: string): ProviderLiveEventCandidate[] {
+    private eventsFromHtml(
+        body: string,
+        baseUrl: string
+    ): ProviderLiveEventCandidate[] {
         const $ = cheerio.load(body);
         const events: ProviderLiveEventCandidate[] = [];
-        const rowSelector = process.env.DADDYLIVE_EVENT_ROW_SELECTOR;
+        const rowSelector = envValue(
+            'WATCHPAGE_EVENT_ROW_SELECTOR',
+            'LIVE_WATCH_EVENT_ROW_SELECTOR',
+            'DADDYLIVE_EVENT_ROW_SELECTOR'
+        );
         const rows = rowSelector
             ? $(rowSelector).toArray()
             : this.watchLinkRows($);
@@ -378,8 +614,13 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
                 continue;
             }
 
-            const hrefValue = node.attr('href') ?? node.attr('data-href') ?? node.attr('data-url');
-            const href = hrefValue ? this.normalizeHref(hrefValue, baseUrl) : hrefs[0];
+            const hrefValue =
+                node.attr('href') ??
+                node.attr('data-href') ??
+                node.attr('data-url');
+            const href = hrefValue
+                ? this.normalizeHref(hrefValue, baseUrl)
+                : hrefs[0];
             const startsAt = this.parseEventDate(
                 node.attr('data-start') ?? node.attr('data-time') ?? title,
                 node.attr('data-date')
@@ -394,8 +635,18 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
                 providerId: this.id,
                 internalEventId,
                 title: this.stripLeadingTime(title),
-                league: process.env.DADDYLIVE_DEFAULT_LEAGUE ?? 'live',
-                sport: process.env.DADDYLIVE_DEFAULT_SPORT ?? 'live',
+                league:
+                    envValue(
+                        'WATCHPAGE_DEFAULT_LEAGUE',
+                        'LIVE_WATCH_DEFAULT_LEAGUE',
+                        'DADDYLIVE_DEFAULT_LEAGUE'
+                    ) ?? 'live',
+                sport:
+                    envValue(
+                        'WATCHPAGE_DEFAULT_SPORT',
+                        'LIVE_WATCH_DEFAULT_SPORT',
+                        'DADDYLIVE_DEFAULT_SPORT'
+                    ) ?? 'live',
                 startsAt,
                 href,
                 hrefs,
@@ -433,7 +684,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         const collect = (selection: cheerio.Cheerio<any>) => {
             selection.each((_, element) => {
                 const href = $(element).attr('href');
-                const normalized = href ? this.normalizeHref(href, baseUrl) : undefined;
+                const normalized = href
+                    ? this.normalizeHref(href, baseUrl)
+                    : undefined;
                 if (normalized && this.isWatchHref(normalized)) {
                     hrefs.push(normalized);
                 }
@@ -445,8 +698,17 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         return this.unique(hrefs);
     }
 
-    private titleFromHtmlNode($: cheerio.CheerioAPI, node: cheerio.Cheerio<any>): string | undefined {
-        const attrs = ['data-event', 'data-title', 'data-name', 'title', 'aria-label'];
+    private titleFromHtmlNode(
+        $: cheerio.CheerioAPI,
+        node: cheerio.Cheerio<any>
+    ): string | undefined {
+        const attrs = [
+            'data-event',
+            'data-title',
+            'data-name',
+            'title',
+            'aria-label'
+        ];
         for (const attr of attrs) {
             const value = node.attr(attr);
             if (value) {
@@ -454,7 +716,10 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             }
         }
 
-        const heading = node.find('h1,h2,h3,h4,.title,.event-title,.match-title').first().text();
+        const heading = node
+            .find('h1,h2,h3,h4,.title,.event-title,.match-title')
+            .first()
+            .text();
         if (heading) {
             return this.cleanEventTitle(heading);
         }
@@ -475,12 +740,20 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     private async loadAuthorizedSourceMap(): Promise<AuthorizedSourceMap> {
-        const inline = process.env.DADDYLIVE_AUTHORIZED_SOURCE_MAP;
+        const inline = envValue(
+            'WATCHPAGE_AUTHORIZED_SOURCE_MAP',
+            'LIVE_WATCH_AUTHORIZED_SOURCE_MAP',
+            'DADDYLIVE_AUTHORIZED_SOURCE_MAP'
+        );
         if (inline) {
             return JSON.parse(inline) as AuthorizedSourceMap;
         }
 
-        const path = process.env.DADDYLIVE_AUTHORIZED_SOURCE_MAP_PATH;
+        const path = envValue(
+            'WATCHPAGE_AUTHORIZED_SOURCE_MAP_PATH',
+            'LIVE_WATCH_AUTHORIZED_SOURCE_MAP_PATH',
+            'DADDYLIVE_AUTHORIZED_SOURCE_MAP_PATH'
+        );
         if (!path) {
             return {};
         }
@@ -494,14 +767,19 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             ...event.providers
                 .filter((provider) => provider.providerId === this.id)
                 .flatMap((provider) =>
-                    [provider.internalEventId, provider.href, ...(provider.hrefs ?? [])].filter(
-                        (value): value is string => Boolean(value)
-                    )
+                    [
+                        provider.internalEventId,
+                        provider.href,
+                        ...(provider.hrefs ?? [])
+                    ].filter((value): value is string => Boolean(value))
                 )
         ];
     }
 
-    private parseEventDate(timeValue?: string, dateValue?: string): string | undefined {
+    private parseEventDate(
+        timeValue?: string,
+        dateValue?: string
+    ): string | undefined {
         const raw = [dateValue, timeValue].filter(Boolean).join(' ').trim();
         if (!raw) {
             return undefined;
@@ -525,9 +803,20 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         if (meridiem === 'pm' && hour < 12) hour += 12;
         if (meridiem === 'am' && hour === 12) hour = 0;
 
-        const offsetMinutes = Number(process.env.DADDYLIVE_TIMEZONE_OFFSET_MINUTES ?? 0);
+        const offsetMinutes = envNumber(
+            0,
+            'WATCHPAGE_TIMEZONE_OFFSET_MINUTES',
+            'LIVE_WATCH_TIMEZONE_OFFSET_MINUTES',
+            'DADDYLIVE_TIMEZONE_OFFSET_MINUTES'
+        );
         const utcMs =
-            Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour, minute) -
+            Date.UTC(
+                date.getUTCFullYear(),
+                date.getUTCMonth(),
+                date.getUTCDate(),
+                hour,
+                minute
+            ) -
             offsetMinutes * 60 * 1000;
 
         return new Date(utcMs).toISOString();
@@ -543,7 +832,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             return direct;
         }
 
-        const match = value.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+        const match = value.match(
+            /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/
+        );
         if (!match) {
             return undefined;
         }
@@ -556,10 +847,14 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         return new Date(Date.UTC(year, month, day));
     }
 
-    private dedupeEvents(events: ProviderLiveEventCandidate[]): ProviderLiveEventCandidate[] {
+    private dedupeEvents(
+        events: ProviderLiveEventCandidate[]
+    ): ProviderLiveEventCandidate[] {
         const byKey = new Map<string, ProviderLiveEventCandidate>();
         for (const event of events) {
-            const key = [event.internalEventId, event.title, event.startsAt].filter(Boolean).join(':');
+            const key = [event.internalEventId, event.title, event.startsAt]
+                .filter(Boolean)
+                .join(':');
             if (!byKey.has(key)) {
                 byKey.set(key, event);
             }
@@ -567,7 +862,10 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         return Array.from(byKey.values());
     }
 
-    private firstString(record: JsonRecord, keys: string[]): string | undefined {
+    private firstString(
+        record: JsonRecord,
+        keys: string[]
+    ): string | undefined {
         for (const key of keys) {
             const value = record[key];
             if (typeof value === 'string' && value.trim()) {
@@ -577,7 +875,10 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         return undefined;
     }
 
-    private firstScalar(record: JsonRecord, keys: string[]): string | undefined {
+    private firstScalar(
+        record: JsonRecord,
+        keys: string[]
+    ): string | undefined {
         for (const key of keys) {
             const value = record[key];
             if (typeof value === 'string' || typeof value === 'number') {
@@ -595,7 +896,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         return undefined;
     }
 
-    private teamsFromRecord(record: JsonRecord): ProviderLiveEventCandidate['teams'] {
+    private teamsFromRecord(
+        record: JsonRecord
+    ): ProviderLiveEventCandidate['teams'] {
         const home = this.firstString(record, ['home', 'homeTeam', 'teamHome']);
         const away = this.firstString(record, ['away', 'awayTeam', 'teamAway']);
         if (!home && !away) {
@@ -608,7 +911,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         const fields = ['links', 'streams', 'sources', 'channels'];
         return fields.reduce((count, field) => {
             const value = record[field];
-            return count + (Array.isArray(value) ? value.length : value ? 1 : 0);
+            return (
+                count + (Array.isArray(value) ? value.length : value ? 1 : 0)
+            );
         }, 0);
     }
 
@@ -644,10 +949,14 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         return hrefs;
     }
 
-    private dedupeScheduleRows(rows: DaddyLiveScheduleRow[]): DaddyLiveScheduleRow[] {
+    private dedupeScheduleRows(
+        rows: DaddyLiveScheduleRow[]
+    ): DaddyLiveScheduleRow[] {
         const byKey = new Map<string, DaddyLiveScheduleRow>();
         for (const row of rows) {
-            const key = [row.internalEventId, row.title, row.startsAt].filter(Boolean).join(':');
+            const key = [row.internalEventId, row.title, row.startsAt]
+                .filter(Boolean)
+                .join(':');
             const existing = byKey.get(key);
             if (!existing) {
                 byKey.set(key, row);
@@ -658,7 +967,11 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             byKey.set(key, {
                 ...existing,
                 hrefs,
-                sourceCount: Math.max(existing.sourceCount, row.sourceCount, hrefs.length)
+                sourceCount: Math.max(
+                    existing.sourceCount,
+                    row.sourceCount,
+                    hrefs.length
+                )
             });
         }
 
@@ -674,7 +987,11 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             return context;
         }
 
-        if (['data', 'schedule', 'events', 'result', 'results'].includes(label.toLowerCase())) {
+        if (
+            ['data', 'schedule', 'events', 'result', 'results'].includes(
+                label.toLowerCase()
+            )
+        ) {
             return context;
         }
 
@@ -693,24 +1010,40 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
 
     private looksLikeDateHeader(value: string): boolean {
         return (
-            /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(value) ||
+            /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
+                value
+            ) ||
             /\b\d{1,2}(?:st|nd|rd|th)?\s+[a-z]+\s+\d{4}\b/i.test(value) ||
             /\b\d{4}-\d{2}-\d{2}\b/.test(value)
         );
     }
 
-    private matchScore(event: LiveEventManifest, row: DaddyLiveScheduleRow): number {
-        if (row.startsAt && !this.isWithinTimeWindow(event.startsAt, row.startsAt)) {
+    private matchScore(
+        event: LiveEventManifest,
+        row: DaddyLiveScheduleRow
+    ): number {
+        if (
+            row.startsAt &&
+            !this.isWithinTimeWindow(event.startsAt, row.startsAt)
+        ) {
             return 0;
         }
 
         const textScore = Math.max(
-            ...this.searchQueriesForEvent(event).map((query) => this.textSimilarity(query, row.title))
+            ...this.searchQueriesForEvent(event).map((query) =>
+                this.textSimilarity(query, row.title)
+            )
         );
         const teamScore = this.teamMatchScore(event, row);
-        const leagueScore = this.textSimilarity(event.league, row.league ?? row.title);
+        const leagueScore = this.textSimilarity(
+            event.league,
+            row.league ?? row.title
+        );
         const timeScore = row.startsAt ? 0.15 : 0;
-        return Math.min(1, Math.max(textScore, teamScore) + leagueScore * 0.1 + timeScore);
+        return Math.min(
+            1,
+            Math.max(textScore, teamScore) + leagueScore * 0.1 + timeScore
+        );
     }
 
     private searchQueriesForEvent(event: LiveEventManifest): string[] {
@@ -720,7 +1053,12 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             queries.push(`${event.teams.home} vs ${event.teams.away}`);
         }
 
-        const withoutSession = event.title.replace(/\b(?:practice|qualifying|sprint|race|grand prix)\b/gi, ' ').trim();
+        const withoutSession = event.title
+            .replace(
+                /\b(?:practice|qualifying|sprint|race|grand prix)\b/gi,
+                ' '
+            )
+            .trim();
         if (withoutSession && withoutSession !== event.title) {
             queries.push(withoutSession);
         }
@@ -728,7 +1066,10 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         return this.unique(queries);
     }
 
-    private teamMatchScore(event: LiveEventManifest, row: DaddyLiveScheduleRow): number {
+    private teamMatchScore(
+        event: LiveEventManifest,
+        row: DaddyLiveScheduleRow
+    ): number {
         const home = event.teams?.home;
         const away = event.teams?.away;
         if (!home || !away) {
@@ -736,7 +1077,8 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         }
 
         const rowText = this.normalizeSearchText(row.title);
-        return rowText.includes(this.normalizeSearchText(home)) && rowText.includes(this.normalizeSearchText(away))
+        return rowText.includes(this.normalizeSearchText(home)) &&
+            rowText.includes(this.normalizeSearchText(away))
             ? 0.95
             : 0;
     }
@@ -755,7 +1097,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
         }
 
         const rightSet = new Set(rightTokens);
-        const intersection = leftTokens.filter((token) => rightSet.has(token)).length;
+        const intersection = leftTokens.filter((token) =>
+            rightSet.has(token)
+        ).length;
         const union = new Set([...leftTokens, ...rightTokens]).size;
         return intersection / union;
     }
@@ -798,7 +1142,16 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
             return true;
         }
 
-        const windowMs = this.numberEnv('DADDYLIVE_MATCH_TIME_WINDOW_HOURS', DEFAULT_MATCH_TIME_WINDOW_HOURS) * 60 * 60 * 1000;
+        const windowMs =
+            envNumber(
+                DEFAULT_MATCH_TIME_WINDOW_HOURS,
+                'WATCHPAGE_MATCH_TIME_WINDOW_HOURS',
+                'LIVE_WATCH_MATCH_TIME_WINDOW_HOURS',
+                'DADDYLIVE_MATCH_TIME_WINDOW_HOURS'
+            ) *
+            60 *
+            60 *
+            1000;
         return Math.abs(leftTime - rightTime) <= windowMs;
     }
 
@@ -811,35 +1164,79 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     private isWatchHref(value: string): boolean {
-        const patterns = this.csv(process.env.DADDYLIVE_WATCH_HREF_PATTERNS ?? 'watch.php?id=');
+        const patterns = this.csv(
+            envValue(
+                'WATCHPAGE_HREF_PATTERNS',
+                'LIVE_WATCH_HREF_PATTERNS',
+                'DADDYLIVE_WATCH_HREF_PATTERNS'
+            ) ?? 'watch.php?id=,/watch,/stream,/embed,/play'
+        );
         const normalized = value.toLowerCase();
-        return patterns.some((pattern) => normalized.includes(pattern.toLowerCase()));
+        return patterns.some((pattern) =>
+            normalized.includes(pattern.toLowerCase())
+        );
     }
 
     private unique(values: Array<string | undefined>): string[] {
-        return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+        return Array.from(
+            new Set(values.filter((value): value is string => Boolean(value)))
+        );
     }
 
     private uniqueElements(elements: any[]): any[] {
         return Array.from(new Set(elements));
     }
 
-    private numberEnv(name: string, defaultValue: number): number {
-        const value = Number(process.env[name]);
-        return Number.isFinite(value) ? value : defaultValue;
-    }
-
     private csv(value: string): string[] {
-        return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+        return value
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
     }
 
-    private normalizeSourceType(type: Source['type'] | undefined, url: string): Source['type'] {
+    private normalizeSourceType(
+        type: Source['type'] | undefined,
+        url: string
+    ): Source['type'] {
         if (type && SOURCE_TYPES.includes(type)) {
             return type;
         }
 
         const inferred = this.inferType(url);
-        return SOURCE_TYPES.includes(inferred as Source['type']) ? (inferred as Source['type']) : 'hls';
+        return SOURCE_TYPES.includes(inferred as Source['type'])
+            ? (inferred as Source['type'])
+            : 'hls';
+    }
+
+    private dedupeSources<T extends { url: string }>(sources: T[]): T[] {
+        const byUrl = new Map<string, T>();
+        for (const source of sources) {
+            const key = this.sourceDedupeKey(source.url);
+            if (!byUrl.has(key)) {
+                byUrl.set(key, source);
+            }
+        }
+        return Array.from(byUrl.values());
+    }
+
+    private sourceDedupeKey(value: string): string {
+        try {
+            const url = new URL(value);
+            const nestedUrl =
+                url.searchParams.get('url') ?? url.searchParams.get('source');
+            if (nestedUrl) {
+                return this.sourceDedupeKey(nestedUrl);
+            }
+            url.hash = '';
+            url.searchParams.sort();
+            return url.toString();
+        } catch {
+            return value;
+        }
+    }
+
+    private errorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
     }
 
     private looksLikeJson(body: string): boolean {
@@ -848,7 +1245,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     private isRecord(value: unknown): value is JsonRecord {
-        return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+        return (
+            Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+        );
     }
 
     private cleanText(value: string): string {
@@ -868,7 +1267,9 @@ export class DaddyLiveProvider extends BaseProvider implements LiveProvider {
     }
 
     private stripLeadingTime(value: string): string {
-        return value.replace(/^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-|:]\s*/i, '').trim();
+        return value
+            .replace(/^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-|:]\s*/i, '')
+            .trim();
     }
 
     private emptyResult(message: string): ProviderResult {

@@ -6,57 +6,35 @@ import type {
 } from '@omss/framework';
 import type { VideasyServer } from './videasy.types.js';
 import { decryptResponse } from './decryptor.js';
+import type { DecryptedPayload } from './decryptor.js';
+import {
+    resolveVideasyServers,
+    VIDEASY_ACTIVE_SERVERS,
+    VIDEASY_FAMILY_ID,
+    type VideasyLeafEnvironment
+} from './videasy.config.js';
+import {
+    createProviderIdentityCatalog,
+    type IdentifiedSource
+} from '../../provider-identity.js';
 
-/**
- * all known api endpoints. mb-flix is the primary english source.
- * endpoints like meine, overflix, cuevana serve other languages.
- * hdmovie returns sources where the "quality" field is actually
- * a language label ("Hindi", "English") rather than a resolution.
- * those which are commented do not work
- */
+const identityCatalog = createProviderIdentityCatalog([
+    { id: VIDEASY_FAMILY_ID, kind: 'aggregator' },
+    ...VIDEASY_ACTIVE_SERVERS.map(({ name }) => ({
+        id: `${VIDEASY_FAMILY_ID}:${name}`,
+        familyId: VIDEASY_FAMILY_ID,
+        kind: 'upstream'
+    }))
+]);
 
-const VIDEASY_SERVERS: readonly VideasyServer[] = [
-    // { name: 'primesrcme', url: 'https://api.videasy.net/primesrcme/sources-with-title' },
-    // { name: 'm4uhd',      url: 'https://api.videasy.net/m4uhd/sources-with-title' },
-    // { name: 'meine-de',   url: 'https://api.videasy.net/meine/sources-with-title', language: 'german' },
-    // { name: 'meine-it',   url: 'https://api.videasy.net/meine/sources-with-title', language: 'italian' },
-    // { name: 'meine-fr',   url: 'https://api.videasy.net/meine/sources-with-title', language: 'french' },
-    // { name: 'overflix',    url: 'https://api2.videasy.net/overflix/sources-with-title',   language: 'english' },
-    // { name: 'visioncine',  url: 'https://api.videasy.net/visioncine/sources-with-title',  language: 'english' },
-    // { name: 'hdmovie',     url: 'https://api.videasy.net/hdmovie/sources-with-title',     language: 'english' },
-    // { name: 'primewire',   url: 'https://api2.videasy.net/primewire/sources-with-title',  language: 'english' },
-
-    {
-        name: 'cuevana',
-        url: 'https://api2.videasy.net/cuevana/sources-with-title',
-        language: 'english'
-    },
-    {
-        name: 'mb-flix',
-        url: 'https://api.videasy.net/mb-flix/sources-with-title',
-        language: 'english'
-    },
-    {
-        name: '1movies',
-        url: 'https://api.videasy.net/1movies/sources-with-title',
-        language: 'english'
-    },
-    {
-        name: 'cdn',
-        url: 'https://api.videasy.net/cdn/sources-with-title',
-        language: 'english'
-    },
-    {
-        name: 'superflix',
-        url: 'https://api.videasy.net/superflix/sources-with-title',
-        language: 'english'
-    },
-    {
-        name: 'lamovie',
-        url: 'https://api.videasy.net/lamovie/sources-with-title',
-        language: 'english'
-    }
-] as const;
+export type VideasyDependencies = {
+    readonly environment?: VideasyLeafEnvironment;
+    readonly fetch?: typeof fetch;
+    readonly decrypt?: (
+        blob: string,
+        tmdbId: string
+    ) => Promise<DecryptedPayload | null>;
+};
 
 export class VideasyProvider extends BaseProvider {
     readonly id = 'Videasy';
@@ -74,6 +52,18 @@ export class VideasyProvider extends BaseProvider {
     readonly capabilities: ProviderCapabilities = {
         supportedContentTypes: ['movies', 'tv']
     };
+    private readonly servers: readonly VideasyServer[];
+    private readonly fetchImpl: typeof fetch;
+    private readonly decryptImpl: NonNullable<VideasyDependencies['decrypt']>;
+
+    constructor(dependencies: VideasyDependencies = {}) {
+        super();
+        this.servers = resolveVideasyServers(
+            dependencies.environment ?? process.env
+        );
+        this.fetchImpl = dependencies.fetch ?? fetch;
+        this.decryptImpl = dependencies.decrypt ?? decryptResponse;
+    }
 
     async getMovieSources(media: ProviderMediaObject): Promise<ProviderResult> {
         return this.getSources(media);
@@ -88,7 +78,7 @@ export class VideasyProvider extends BaseProvider {
         media: ProviderMediaObject
     ): Promise<ProviderResult> {
         const results = await Promise.allSettled(
-            VIDEASY_SERVERS.map((server) => this.fetchFromServer(server, media))
+            this.servers.map((server) => this.fetchFromServer(server, media))
         );
 
         const sources: ProviderResult['sources'] = [];
@@ -108,7 +98,7 @@ export class VideasyProvider extends BaseProvider {
         if (failCount > 0 && sources.length > 0) {
             diagnostics.push({
                 code: 'PARTIAL_SCRAPE',
-                message: `${failCount} of ${VIDEASY_SERVERS.length} videasy servers did not return results`,
+                message: `${failCount} of ${this.servers.length} videasy servers did not return results`,
                 field: '',
                 severity: 'warning'
             });
@@ -137,39 +127,47 @@ export class VideasyProvider extends BaseProvider {
     ): Promise<ProviderResult | null> {
         const params = this.buildParams(server, media);
         const url = `${server.url}?${new URLSearchParams(params as Record<string, string>)}`;
-        const response = await fetch(url, { headers: this.HEADERS });
+        const response = await this.fetchImpl(url, { headers: this.HEADERS });
 
         if (!response.ok) {
-            return this.emptyResult('invalid response', media);
+            return null;
         }
 
         // api returns plain text hex blob, not json
         const blob = await response.text();
 
         if (!blob || blob.length < 10) {
-            return this.emptyResult('INVALID RESPONSE', media);
+            return null;
         }
 
-        const decrypted = await decryptResponse(blob, String(media.tmdbId));
+        const decrypted = await this.decryptImpl(blob, String(media.tmdbId));
 
         if (!decrypted || decrypted.sources.length === 0) {
-            return this.emptyResult('Unable to Decode', media);
+            return null;
         }
 
-        const sources: ProviderResult['sources'] = decrypted.sources
+        const sources: IdentifiedSource[] = decrypted.sources
             .filter((s) => !!s?.url)
-            .map((s) => ({
-                url: this.createProxyUrl(s.url, this.HEADERS),
-                type: this.detectType(s.url, s.type),
-                quality: this.normalizeQuality(s.quality),
-                audioTracks: [
+            .map((s) =>
+                identityCatalog.identifySource(
                     {
-                        language: this.resolveLanguage(server),
-                        label: this.resolveLanguageLabel(server)
+                        url: this.createProxyUrl(s.url, this.HEADERS),
+                        type: this.detectType(s.url, s.type),
+                        quality: this.normalizeQuality(s.quality),
+                        audioTracks: [
+                            {
+                                language: this.resolveLanguage(server),
+                                label: this.resolveLanguageLabel(server)
+                            }
+                        ]
+                    },
+                    {
+                        familyId: VIDEASY_FAMILY_ID,
+                        upstreamId: `${VIDEASY_FAMILY_ID}:${server.name}`,
+                        providerName: this.name
                     }
-                ],
-                provider: { id: this.id, name: this.name }
-            }));
+                )
+            );
 
         const subtitles: ProviderResult['subtitles'] = decrypted.subtitles
             .filter((s) => !!s?.url)
@@ -268,7 +266,7 @@ export class VideasyProvider extends BaseProvider {
 
     async healthCheck(): Promise<boolean> {
         try {
-            const res = await fetch(this.BASE_URL, {
+            const res = await this.fetchImpl(this.BASE_URL, {
                 method: 'HEAD',
                 headers: this.HEADERS
             });

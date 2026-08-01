@@ -11,6 +11,19 @@ import type {
 } from '@omss/framework';
 
 import decrypt from './decrypt.js';
+import {
+    createVidnestLeafPolicy,
+    VIDNEST_ELIGIBLE_LEAVES,
+    VIDNEST_FAMILY_ID,
+    VIDNEST_REQUESTED_SERVERS,
+    type VidnestLeaf,
+    type VidnestLeafEnvironment,
+    type VidnestLeafPolicy
+} from './vidnest.config.js';
+import {
+    createProviderIdentityCatalog,
+    type IdentifiedSource
+} from '../../provider-identity.js';
 import type {
     ServerMap,
     SupportedServer,
@@ -23,6 +36,22 @@ import type {
     deltaResponse,
     movieboxSource
 } from './vidnest.types.js';
+
+const identityCatalog = createProviderIdentityCatalog([
+    { id: VIDNEST_FAMILY_ID, kind: 'aggregator' },
+    ...VIDNEST_ELIGIBLE_LEAVES.map((leaf) => ({
+        id: `${VIDNEST_FAMILY_ID}:${leaf}`,
+        familyId: VIDNEST_FAMILY_ID,
+        kind: 'upstream'
+    }))
+]);
+
+export type VidnestDependencies = {
+    readonly environment?: VidnestLeafEnvironment;
+    readonly leafPolicy?: VidnestLeafPolicy;
+    readonly fetch?: typeof fetch;
+    readonly decrypt?: <T>(payload: string) => T;
+};
 
 export class VidNestProvider extends BaseProvider {
     readonly id = 'vidnest';
@@ -44,18 +73,13 @@ export class VidNestProvider extends BaseProvider {
     /**
      * ALL servers (some unsupported)
      */
-    private readonly SERVERS: { path: string; query: string }[] = [
-        { path: 'moviebox', query: '' },
-        { path: 'allmovies', query: '' },
-        { path: 'catflix', query: '' },
-        { path: 'purstream', query: '' },
-        { path: 'hollymoviehd', query: '' },
-        { path: 'lamda', query: '' },
-        { path: 'flixhq', query: '' },
-        { path: 'vidlink', query: '' },
-        { path: 'onehd', query: '?server=upcloud' },
-        { path: 'klikxxi', query: '' }
-    ];
+    private readonly SERVERS: readonly {
+        path: (typeof VIDNEST_REQUESTED_SERVERS)[number];
+        query: string;
+    }[];
+    private readonly leafPolicy: VidnestLeafPolicy;
+    private readonly fetchImpl: typeof fetch;
+    private readonly decryptImpl: NonNullable<VidnestDependencies['decrypt']>;
 
     private readonly handlers: {
         [K in SupportedServer]: {
@@ -65,40 +89,40 @@ export class VidNestProvider extends BaseProvider {
         };
     } = {
         klikxxi: {
-            parse: (d) => decrypt<klikxxiResponse>(d),
+            parse: (d) => this.decryptImpl<klikxxiResponse>(d),
             mapSources: (root) =>
                 root.sources.map((s) => ({
                     url: this.createProxyUrl(s.url),
                     type: this.inferSourceType(s.type, s.url),
                     quality: s.quality,
                     audioTracks: [{ language: 'English', label: 'eng' }],
-                    provider: { id: this.id, name: this.name }
+                    ...this.identity('klikxxi')
                 })),
             mapSubtitles: () => []
         },
 
         allmovies: {
-            parse: (d) => decrypt<allmoviesResponse>(d),
+            parse: (d) => this.decryptImpl<allmoviesResponse>(d),
             mapSources: (root) =>
                 root.streams.map((s) => ({
                     url: this.createProxyUrl(s.url),
                     type: this.inferSourceType(s.type, s.url),
                     quality: 'Auto',
                     audioTracks: [{ language: s.language, label: s.language }],
-                    provider: { id: this.id, name: this.name }
+                    ...this.identity('allmovies')
                 })),
             mapSubtitles: () => []
         },
 
         onehd: {
-            parse: (d) => decrypt<onehdResponse>(d),
+            parse: (d) => this.decryptImpl<onehdResponse>(d),
             mapSources: (root) => [
                 {
                     url: this.createProxyUrl(root.url, root.headers),
                     type: this.inferSourceType('', root.url),
                     quality: 'Auto',
                     audioTracks: [{ language: 'English', label: 'eng' }],
-                    provider: { id: this.id, name: this.name }
+                    ...this.identity('onehd')
                 }
             ],
             mapSubtitles: (root) =>
@@ -110,20 +134,20 @@ export class VidNestProvider extends BaseProvider {
         },
 
         hollymoviehd: {
-            parse: (d) => decrypt<hollymoviehdResponse>(d),
+            parse: (d) => this.decryptImpl<hollymoviehdResponse>(d),
             mapSources: (root) =>
                 root.sources.map((s) => ({
                     url: this.createProxyUrl(s.file),
                     type: this.inferSourceType(s.type, s.file),
                     quality: s.label,
                     audioTracks: [{ language: 'English', label: 'eng' }],
-                    provider: { id: this.id, name: this.name }
+                    ...this.identity('hollymoviehd')
                 })),
             mapSubtitles: () => []
         },
 
         vidlink: {
-            parse: (d) => decrypt<vidlinkResponse>(d),
+            parse: (d) => this.decryptImpl<vidlinkResponse>(d),
             mapSources: (root) => [
                 {
                     url: this.createProxyUrl(
@@ -136,7 +160,7 @@ export class VidNestProvider extends BaseProvider {
                     ),
                     quality: 'Auto',
                     audioTracks: [{ language: 'English', label: 'eng' }],
-                    provider: { id: this.id, name: this.name }
+                    ...this.identity('vidlink')
                 }
             ],
             mapSubtitles: (root) =>
@@ -148,7 +172,7 @@ export class VidNestProvider extends BaseProvider {
         },
 
         delta: {
-            parse: (d) => decrypt<deltaResponse>(d),
+            parse: (d) => this.decryptImpl<deltaResponse>(d),
             mapSources: (root) =>
                 root.streams.map((s) => ({
                     url: this.createProxyUrl(s.url),
@@ -163,20 +187,20 @@ export class VidNestProvider extends BaseProvider {
         },
 
         purstream: {
-            parse: (d) => decrypt<purstreamResponse>(d),
+            parse: (d) => this.decryptImpl<purstreamResponse>(d),
             mapSources: (root) =>
                 root.sources.map((s) => ({
                     url: this.createProxyUrl(s.url),
                     type: this.inferSourceType(s.format, s.url),
                     quality: this.inferQuality(s.name),
                     audioTracks: [{ language: 'French', label: 'fr' }],
-                    provider: { id: this.id, name: this.name }
+                    ...this.identity('purstream')
                 })),
             mapSubtitles: () => []
         },
 
         moviebox: {
-            parse: (d) => decrypt<movieboxSource>(d),
+            parse: (d) => this.decryptImpl<movieboxSource>(d),
             mapSources: (root) =>
                 root.url.map((u) => ({
                     url: this.createProxyUrl(u.link, this.HEADERS),
@@ -185,7 +209,7 @@ export class VidNestProvider extends BaseProvider {
                     audioTracks: [
                         { language: u.lang.slice(0, 3), label: u.lang }
                     ],
-                    provider: { id: this.id, name: this.name }
+                    ...this.identity('moviebox')
                 })),
             mapSubtitles: () => []
         }
@@ -194,6 +218,23 @@ export class VidNestProvider extends BaseProvider {
     readonly capabilities: ProviderCapabilities = {
         supportedContentTypes: ['movies', 'tv']
     };
+
+    constructor(dependencies: VidnestDependencies = {}) {
+        super();
+        this.leafPolicy =
+            dependencies.leafPolicy ??
+            createVidnestLeafPolicy(dependencies.environment ?? process.env);
+        this.SERVERS = VIDNEST_REQUESTED_SERVERS.filter(
+            (path) =>
+                !VIDNEST_ELIGIBLE_LEAVES.includes(path as VidnestLeaf) ||
+                this.leafPolicy.enabled(path as VidnestLeaf)
+        ).map((path) => ({
+            path,
+            query: path === 'onehd' ? '?server=upcloud' : ''
+        }));
+        this.fetchImpl = dependencies.fetch ?? fetch;
+        this.decryptImpl = dependencies.decrypt ?? decrypt;
+    }
 
     async getMovieSources(media: ProviderMediaObject): Promise<ProviderResult> {
         return this.getSources(media);
@@ -220,16 +261,16 @@ export class VidNestProvider extends BaseProvider {
         });
 
         const results = await Promise.allSettled(promises);
+        const rejectedCount = results.filter(
+            (result) => result.status === 'rejected'
+        ).length;
 
-        if (
-            results.filter((r) => r.status === 'rejected').length ===
-            results.length
-        ) {
+        if (rejectedCount > 0) {
             diagnostics.push({
                 code: 'PARTIAL_SCRAPE',
                 field: '',
-                message: `${this.name}: ${results.length - results.filter((r) => r.status === 'rejected').length}/${results.length} did not have the requested media`,
-                severity: 'error'
+                message: `${this.name}: ${rejectedCount}/${results.length} upstream requests failed`,
+                severity: rejectedCount === results.length ? 'error' : 'warning'
             });
         }
 
@@ -251,14 +292,24 @@ export class VidNestProvider extends BaseProvider {
             const key = server.path as SupportedServer;
 
             if (!(key in this.handlers)) return;
+            if (!this.leafPolicy.enabled(key as VidnestLeaf)) return;
 
-            const { sources: s, subtitles: sub } = this.handleServer(
-                key,
-                result.value.data
-            );
+            try {
+                const { sources: s, subtitles: sub } = this.handleServer(
+                    key,
+                    result.value.data
+                );
 
-            sources.push(...s);
-            subtitles.push(...sub);
+                sources.push(...s);
+                subtitles.push(...sub);
+            } catch {
+                diagnostics.push({
+                    code: 'PARTIAL_SCRAPE',
+                    field: '',
+                    message: `${this.name}: ${server.path} returned an unusable response`,
+                    severity: 'warning'
+                });
+            }
         });
 
         return {
@@ -290,13 +341,36 @@ export class VidNestProvider extends BaseProvider {
     }
 
     private async fetchVidnest(url: string) {
-        const res = await fetch(url, { headers: this.HEADERS });
+        const res = await this.fetchImpl(url, { headers: this.HEADERS });
 
         if (!res.ok) {
             throw new Error(`VidNest: ${res.status}`);
         }
 
         return res.json() as Promise<{ encrypted: boolean; data: string }>;
+    }
+
+    private identity(
+        leaf: VidnestLeaf
+    ): Pick<IdentifiedSource, 'provider' | 'providerFamilyId' | 'upstreamId'> {
+        const identified = identityCatalog.identifySource(
+            {
+                url: 'https://identity.invalid',
+                type: 'hls',
+                quality: 'Auto',
+                audioTracks: []
+            },
+            {
+                familyId: VIDNEST_FAMILY_ID,
+                upstreamId: `${VIDNEST_FAMILY_ID}:${leaf}`,
+                providerName: this.name
+            }
+        );
+        return {
+            provider: identified.provider,
+            providerFamilyId: identified.providerFamilyId,
+            upstreamId: identified.upstreamId
+        };
     }
 
     private inferSourceType(type: string, url: string): SourceType {

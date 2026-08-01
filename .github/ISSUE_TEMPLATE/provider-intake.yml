@@ -1,0 +1,149 @@
+name: Provider intake
+description: Propose a new identity-resolving movie or TV provider for research.
+title: "provider: "
+labels: ["📀provider", "🔺needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form starts research; it does not certify a provider. Read the
+        [provider catalog policy](https://github.com/cinepro-org/core/blob/main/docs/provider-catalog.md)
+        first.
+
+        Do not submit passwords, API keys, cookies, bearer tokens, signed media
+        URLs, DRM material, personal watch history, or anti-bot bypass steps.
+
+  - type: checkboxes
+    id: authorization
+    attributes:
+      label: Safety and authorization
+      options:
+        - label: I am authorized to access and share the submitted watch-page URLs.
+          required: true
+        - label: The provider independently maps stable movie or episode identity to sources; it is not only an embed host, CDN, redirect, or one-time media URL.
+          required: true
+        - label: I removed credentials, cookies, tokens, signatures, and personal data from all evidence.
+          required: true
+
+  - type: input
+    id: name
+    attributes:
+      label: Provider name
+      placeholder: "Example Provider"
+    validations:
+      required: true
+
+  - type: input
+    id: catalog
+    attributes:
+      label: Proposed catalog ID or existing entry
+      description: Use a lowercase kebab ID when proposing a new entry.
+      placeholder: "example-provider"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: region
+    attributes:
+      label: Primary region
+      options:
+        - Global
+        - French
+        - Italian
+        - Spanish
+        - Portuguese
+        - Turkish
+        - German
+        - Arabic
+        - Asian / anime
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: content
+    attributes:
+      label: Claimed content
+      multiple: true
+      options:
+        - Movies
+        - TV episodes
+        - Subtitles
+    validations:
+      required: true
+
+  - type: textarea
+    id: identities
+    attributes:
+      label: Two authorized identities
+      description: |
+        Supply two currently known-working watch pages. If both movies and TV
+        are claimed, include one of each. Use stable watch pages, not media URLs.
+      placeholder: |
+        Identity 1:
+        - Type:
+        - Public title / stable ID:
+        - Authorized watch-page URL:
+
+        Identity 2:
+        - Type:
+        - Public title / stable ID:
+        - Authorized watch-page URL:
+    validations:
+      required: true
+
+  - type: textarea
+    id: domains
+    attributes:
+      label: Domain classification
+      description: Classify identity, API, embed-host, CDN/media, subtitle, and redirect domains.
+      placeholder: |
+        - identity.example — identity/watch pages
+        - api.example — metadata/resolver API
+        - embed.example — embed host
+    validations:
+      required: true
+
+  - type: dropdown
+    id: output
+    attributes:
+      label: Observed output
+      multiple: true
+      options:
+        - HLS
+        - MP4
+        - Embed
+        - Unknown
+        - Unsupported download / torrent / DRM
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized implementation evidence
+      description: |
+        Describe stable ID mapping, public manifests/source code, response
+        shape, required non-secret headers, language/subtitle behavior, and
+        failure behavior. Do not paste raw responses containing tokens or URLs.
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Redirect, anti-bot, and legal/operational risks
+      description: Describe observations only. Do not include bypass instructions.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: acceptance
+    attributes:
+      label: Certification expectations
+      options:
+        - label: I understand that root HTTP status, compilation, URL construction, public source code, or one playback is not certification.
+          required: true
+        - label: I understand that sanitized fixtures, deterministic tests, media validation, browser playback, and a canary are required before enablement.
+          required: true

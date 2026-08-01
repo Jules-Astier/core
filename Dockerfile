@@ -45,6 +45,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/config ./config
 
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
