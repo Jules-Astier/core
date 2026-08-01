@@ -1,0 +1,117 @@
+name: Provider healing
+description: Report a regression or degraded provider, family leaf, or embed host.
+title: "provider health: "
+labels: ["🐛bug", "📀provider", "🔺needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for an existing catalog entry. Do not submit passwords,
+        API keys, cookies, bearer tokens, signed media URLs, DRM material,
+        personal watch history, or anti-bot bypass steps.
+
+  - type: input
+    id: catalog_id
+    attributes:
+      label: Catalog ID
+      description: Include the scoped family:leaf or embed-host ID when known.
+      placeholder: "family:leaf"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: observed_state
+    attributes:
+      label: Observed state
+      options:
+        - Degraded / partial failure
+        - Broken / no sources
+        - Redirect drift
+        - Anti-bot challenge
+        - Unexpected domain or host
+        - Wrong family / leaf attribution
+        - Subtitle or language regression
+        - Proxy / header regression
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: identities
+    attributes:
+      label: Two authorized reproduction identities
+      description: |
+        Give stable movie/episode identity and authorized watch-page URLs. If
+        only one identity fails, say so explicitly; do not invent a second.
+      placeholder: |
+        Identity 1:
+        - Type and stable ID:
+        - Authorized watch-page URL:
+        - UTC observation time:
+
+        Identity 2:
+        - Type and stable ID:
+        - Authorized watch-page URL:
+        - UTC observation time:
+    validations:
+      required: true
+
+  - type: textarea
+    id: fingerprint
+    attributes:
+      label: Sanitized failure fingerprint
+      description: |
+        Include bounded DNS/TLS/HTTP status, redirect-domain classification,
+        parser stage, output type, and error taxonomy. Redact query strings,
+        signed URLs, headers, cookies, tokens, response bodies, and history.
+      placeholder: |
+        - First failing stage:
+        - Failure taxonomy:
+        - Status / redirect class:
+        - Expected domain class:
+        - Actual domain class:
+        - Family / leaf impact:
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and sibling behavior
+      description: State whether the family, one leaf, one host, one region, movie, or TV is affected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: change
+    attributes:
+      label: Last known good and suspected change
+      description: Give UTC dates, release/commit if known, and sanitized evidence.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I am authorized to access and share the submitted watch-page URLs.
+          required: true
+        - label: I removed credentials, cookies, tokens, signatures, media URLs, and personal data.
+          required: true
+        - label: I did not interact with ads, bypass anti-bot controls, or include bypass instructions.
+          required: true
+
+  - type: dropdown
+    id: suggested_action
+    attributes:
+      label: Safe immediate action
+      options:
+        - Disable affected leaf only
+        - Disable affected family
+        - Disable affected embed host
+        - Keep enabled but mark degraded
+        - Research only; insufficient evidence
+        - Unknown
+    validations:
+      required: true

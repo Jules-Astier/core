@@ -7,7 +7,21 @@ import type {
     SourceType,
     Subtitle
 } from '@omss/framework';
+import {
+    assertSourceIdentity,
+    type IdentifiedSource
+} from '../../provider-identity.js';
+import {
+    POPR_LEAF_POLICY,
+    POPR_LEAVES,
+    type PoprLeafPolicy
+} from './popr.config.js';
 import { VidnestResponse } from './popr.types.js';
+
+type PoprDependencies = {
+    fetch?: typeof fetch;
+    leafPolicy?: PoprLeafPolicy;
+};
 
 export class PoprProvider extends BaseProvider {
     readonly id = 'popr';
@@ -23,6 +37,15 @@ export class PoprProvider extends BaseProvider {
     readonly capabilities: ProviderCapabilities = {
         supportedContentTypes: ['movies', 'tv']
     };
+
+    private readonly fetchImpl: typeof fetch;
+    private readonly leafPolicy: PoprLeafPolicy;
+
+    constructor(dependencies: PoprDependencies = {}) {
+        super();
+        this.fetchImpl = dependencies.fetch ?? fetch;
+        this.leafPolicy = dependencies.leafPolicy ?? POPR_LEAF_POLICY;
+    }
 
     async getMovieSources(media: ProviderMediaObject): Promise<ProviderResult> {
         try {
@@ -65,10 +88,10 @@ export class PoprProvider extends BaseProvider {
     private async checkStreamType(
         url: string,
         headers: Record<string, string> = {},
-        serverName: string
+        _serverName: string
     ): Promise<{ isValid: boolean; type: SourceType }> {
         try {
-            const res = await fetch(url, {
+            const res = await this.fetchImpl(url, {
                 headers: { ...this.HEADERS, ...headers },
                 signal: AbortSignal.timeout(5000),
                 redirect: 'follow'
@@ -119,18 +142,7 @@ export class PoprProvider extends BaseProvider {
         media: ProviderMediaObject,
         type: 'tv' | 'movie' = 'movie'
     ): Promise<{ sources: Source[]; subtitles: Subtitle[] }> {
-        const servers = [
-            'default',
-            'catflix',
-            'hexa',
-            'Gama',
-            'Liligoon',
-            'Sigma',
-            'Prime',
-            'Alfa',
-            'Lamda',
-            'ynx_vidsrc'
-        ];
+        const leaves = POPR_LEAVES.filter(this.leafPolicy.enabled);
 
         const ep = media.e || 1;
         const season = media.s || 1;
@@ -145,8 +157,9 @@ export class PoprProvider extends BaseProvider {
             );
         };
 
-        const requests = servers.map((server) =>
-            fetch(buildUrl(server), {
+        const requests = leaves.map(async (leaf) => {
+            const server = leaf.requestName;
+            return this.fetchImpl(buildUrl(server), {
                 headers: this.HEADERS
             }).then(async (res) => {
                 if (res.status !== 200) return null;
@@ -175,27 +188,32 @@ export class PoprProvider extends BaseProvider {
                     ...streamHeaders
                 };
 
+                const source: IdentifiedSource = {
+                    url: this.createProxyUrl(stream.url, proxyHeaders),
+                    type,
+                    quality: INVALID_QUALITIES.includes(quality)
+                        ? 'auto'
+                        : quality || 'auto',
+                    audioTracks: [
+                        {
+                            language: languages
+                                ? quality.toLowerCase().slice(0, 3)
+                                : 'eng',
+                            label: languages ? quality : 'English'
+                        }
+                    ],
+                    provider: { name: leaf.displayName, id: leaf.id },
+                    providerFamilyId: 'popr',
+                    upstreamId: leaf.id
+                };
+                assertSourceIdentity(source);
+
                 return {
-                    source: {
-                        url: this.createProxyUrl(stream.url, proxyHeaders),
-                        type,
-                        quality: INVALID_QUALITIES.includes(quality)
-                            ? 'auto'
-                            : quality || 'auto',
-                        audioTracks: [
-                            {
-                                language: languages
-                                    ? quality.toLowerCase().slice(0, 3)
-                                    : 'eng',
-                                label: languages ? quality : 'English'
-                            }
-                        ],
-                        provider: { name: this.name, id: this.id }
-                    },
+                    source,
                     subtitles: data.results?.[0]?.subtitles || []
                 };
-            })
-        );
+            });
+        });
 
         const results = await Promise.allSettled(requests);
 
@@ -236,7 +254,7 @@ export class PoprProvider extends BaseProvider {
             diagnostics: [
                 {
                     code: 'PROVIDER_ERROR',
-                    message: `${this.name}: ${message}`,
+                    message: `${this.name}: ${redactPoprDiagnostic(message)}`,
                     field: '',
                     severity: 'error'
                 }
@@ -246,7 +264,7 @@ export class PoprProvider extends BaseProvider {
 
     async healthCheck(): Promise<boolean> {
         try {
-            const response = await fetch(this.BASE_URL, {
+            const response = await this.fetchImpl(this.BASE_URL, {
                 method: 'HEAD',
                 headers: this.HEADERS
             });
@@ -255,4 +273,13 @@ export class PoprProvider extends BaseProvider {
             return false;
         }
     }
+}
+
+export function redactPoprDiagnostic(message: string): string {
+    return message
+        .replace(/\bhttps?:\/\/[^\s"'<>]+/gi, '[redacted-url]')
+        .replace(
+            /([?&](?:token|key|signature|sig|auth)=)[^&\s]+/gi,
+            '$1[redacted]'
+        );
 }

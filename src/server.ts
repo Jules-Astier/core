@@ -2,8 +2,15 @@ import { OMSSServer } from '@omss/framework';
 import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { knownThirdPartyProxies } from './thirdPartyProxies.js';
 import { streamPatterns } from './streamPatterns.js';
+import { installProviderHealthControl } from './provider-health.js';
+import {
+    createInternalRecheckServer,
+    validateInternalRecheckHost,
+    validateInternalRecheckToken
+} from './health/internal-recheck-server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,7 +30,13 @@ async function main() {
             type: (process.env.CACHE_TYPE as 'memory' | 'redis') ?? 'memory',
             ttl: {
                 sources: 60 * 60,
-                subtitles: 60 * 60 * 24
+                subtitles: 60 * 60 * 24,
+                liveManifest: Number(
+                    process.env.LIVE_MANIFEST_CACHE_TTL ??
+                        process.env.APISPORTS_CACHE_TTL_SECONDS ??
+                        6 * 60 * 60
+                ),
+                liveSources: Number(process.env.LIVE_SOURCE_CACHE_TTL ?? 30)
             },
             redis: {
                 host: process.env.REDIS_HOST ?? 'localhost',
@@ -78,8 +91,69 @@ async function main() {
     // Register providers
     const registry = server.getRegistry();
     await registry.discoverProviders(path.join(__dirname, './providers/'));
+    const catalog = JSON.parse(
+        await readFile(
+            path.join(__dirname, '../config/provider-catalog.yaml'),
+            'utf8'
+        )
+    );
+    const healthControl = await installProviderHealthControl(
+        registry,
+        catalog.entries
+    );
 
     await server.start();
+    let internalServer:
+        | ReturnType<typeof createInternalRecheckServer>
+        | undefined;
+    const internalToken = process.env.CINEPRO_INTERNAL_RECHECK_TOKEN;
+    if (internalToken) {
+        try {
+            validateInternalRecheckToken(internalToken);
+            internalServer = createInternalRecheckServer({
+                token: internalToken,
+                control: healthControl,
+                globalConcurrency: boundedIntegerEnv(
+                    process.env.CINEPRO_INTERNAL_RECHECK_CONCURRENCY,
+                    4,
+                    1,
+                    16
+                )
+            });
+            await listen(
+                internalServer,
+                boundedIntegerEnv(
+                    process.env.CINEPRO_INTERNAL_RECHECK_PORT,
+                    3011,
+                    1,
+                    65_535
+                ),
+                boundedHost(
+                    process.env.CINEPRO_INTERNAL_RECHECK_HOST ?? '127.0.0.1'
+                )
+            );
+        } catch (error) {
+            await server.stop();
+            throw error;
+        }
+    }
+
+    let stopping = false;
+    const stop = async () => {
+        if (stopping) return;
+        stopping = true;
+        if (internalServer) {
+            await new Promise<void>((resolve) =>
+                internalServer!.close(() => resolve())
+            );
+        }
+        await server.stop();
+    };
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+        process.once(signal, () => {
+            void stop().finally(() => process.exit(0));
+        });
+    }
 
     const publicUrl =
         process.env.PUBLIC_URL ??
@@ -112,6 +186,40 @@ ${borderTop}
 ${lines.map(pad).join('\n')}
 ${borderBottom}
 `);
+}
+
+function listen(
+    server: ReturnType<typeof createInternalRecheckServer>,
+    port: number,
+    host: string
+): Promise<void> {
+    return new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(port, host, () => {
+            server.off('error', reject);
+            resolve();
+        });
+    });
+}
+
+function boundedIntegerEnv(
+    value: string | undefined,
+    fallback: number,
+    minimum: number,
+    maximum: number
+): number {
+    if (value === undefined || value === '') return fallback;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+        throw new TypeError(
+            'Internal recheck numeric configuration is invalid'
+        );
+    }
+    return parsed;
+}
+
+function boundedHost(value: string): string {
+    return validateInternalRecheckHost(value);
 }
 
 main().catch(() => {

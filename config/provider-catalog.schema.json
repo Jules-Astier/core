@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cinepro.cc/schemas/provider-catalog.schema.json",
+  "title": "CinePro provider catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "entryDefaults", "entries"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "entryDefaults": { "$ref": "#/$defs/entry" },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "displayName"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?::[a-z0-9]+(?:-[a-z0-9]+)*)?$" },
+        "kind": { "enum": ["provider", "aggregator", "upstream", "embed_host", "torrent_resolver"] },
+        "familyId": { "type": "string" },
+        "displayName": { "type": "string", "minLength": 1 },
+        "aliases": { "type": "array", "items": { "$ref": "#/$defs/alias" } },
+        "regions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "languages": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "content": { "type": "array", "items": { "enum": ["movie", "tv", "live"] }, "minItems": 1 },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["content"],
+          "properties": {
+            "content": { "type": "array", "items": { "enum": ["movie", "tv", "live"] }, "minItems": 1 }
+          }
+        },
+        "outputs": { "type": "array", "items": { "enum": ["hls", "mp4", "embed", "direct-download", "torrent", "metadata", "drm"] } },
+        "status": {
+          "enum": [
+            "discovered",
+            "researching",
+            "seed-needed",
+            "reproducible",
+            "implementing",
+            "deterministic-pass",
+            "live-pass",
+            "saucy-pass",
+            "browser-pass",
+            "canary",
+            "enabled",
+            "degraded",
+            "healing",
+            "broken",
+            "disabled",
+            "deferred",
+            "rejected",
+            "retired"
+          ]
+        },
+        "priority": { "type": "string", "minLength": 1 },
+        "runtime": { "$ref": "#/$defs/runtime" },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "relationships": { "type": "array", "items": { "$ref": "#/$defs/relationship" } },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "rejectionReason": { "type": ["string", "null"] },
+        "deferReason": { "type": ["string", "null"] },
+        "nextAction": { "type": ["string", "null"] }
+      }
+    },
+    "alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "source": { "enum": ["runtime-id", "backlog-name", "display-name", "code-spelling"] },
+        "scope": { "type": "string" },
+        "caseSensitive": { "type": "boolean" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discoverable", "runtimeId", "className", "enabledDefault", "healthCheck"],
+      "properties": {
+        "discoverable": { "type": "boolean" },
+        "runtimeId": { "type": ["string", "null"] },
+        "className": { "type": ["string", "null"] },
+        "enabledDefault": { "enum": [true, false, "environment", "unknown"] },
+        "healthCheck": { "type": "boolean" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "manifest", "sourceFiles", "seedUrls", "lastReviewedAt", "fixture", "gates"],
+      "properties": {
+        "repository": { "type": ["string", "null"], "format": "uri" },
+        "manifest": { "type": ["string", "null"], "format": "uri" },
+        "sourceFiles": { "type": "array", "items": { "type": "string" } },
+        "seedUrls": { "type": "array", "items": { "type": "string", "format": "uri" } },
+        "lastReviewedAt": { "type": ["string", "null"], "format": "date" },
+        "fixture": { "type": ["string", "null"] },
+        "gates": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "reproducible",
+              "deterministic-pass",
+              "live-pass",
+              "saucy-pass",
+              "browser-pass",
+              "canary"
+            ]
+          }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "target"],
+      "properties": {
+        "type": { "enum": ["member_of", "resolves_via", "embeds_on", "alias_of"] },
+        "target": { "type": "string" }
+      }
+    }
+  }
+}

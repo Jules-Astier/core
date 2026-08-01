@@ -8,6 +8,20 @@ import { generateRandomUserAgent } from '../../utils/ua.js';
 import { TulnexApiResponse } from './tulnex.types.js';
 import { decryptPayload } from './decrypt.js';
 import { extractUrl } from './tulnex.mapper.js';
+import {
+    TULNEX_FAMILY_ID,
+    TULNEX_LEAVES,
+    tulnexIdentityCatalog,
+    tulnexUpstreamId,
+    type TulnexLeaf
+} from './tulnex.identity.js';
+import { TULNEX_LEAF_POLICY, type TulnexLeafPolicy } from './tulnex.config.js';
+
+type TulnexDependencies = {
+    fetch?: typeof fetch;
+    decryptPayload?: typeof decryptPayload;
+    leafPolicy?: TulnexLeafPolicy;
+};
 
 export class TulnexProvider extends BaseProvider {
     readonly id = 'tulnex';
@@ -23,22 +37,18 @@ export class TulnexProvider extends BaseProvider {
         'cache-control': 'no-cache'
     };
 
-    readonly SERVERS = [
-        `onion`,
-        `vidzee`,
-        `icefy`,
-        `tik`,
-        `vaplayer`,
-        `vidfast-alpha`,
-        `uniquestream`,
-        `vidfast-mega`,
-        `vidfast-vrapid`,
-        `allmovies`,
-        `vidlink`,
-        `vidfast-vedge`,
-        `vidfast-vfast`,
-        `moviebox`
-    ];
+    readonly SERVERS = TULNEX_LEAVES;
+
+    private readonly fetchImpl: typeof fetch;
+    private readonly decryptPayloadImpl: typeof decryptPayload;
+    private readonly leafPolicy: TulnexLeafPolicy;
+
+    constructor(dependencies: TulnexDependencies = {}) {
+        super();
+        this.fetchImpl = dependencies.fetch ?? fetch;
+        this.decryptPayloadImpl = dependencies.decryptPayload ?? decryptPayload;
+        this.leafPolicy = dependencies.leafPolicy ?? TULNEX_LEAF_POLICY;
+    }
 
     readonly capabilities: ProviderCapabilities = {
         supportedContentTypes: ['movies', 'tv']
@@ -57,7 +67,9 @@ export class TulnexProvider extends BaseProvider {
     ): Promise<ProviderResult> {
         try {
             const results = await Promise.allSettled(
-                this.SERVERS.map((server) => this.doScrape(server, media))
+                this.SERVERS.filter((server) =>
+                    this.leafPolicy.enabledLeaves.has(server)
+                ).map((server) => this.doScrape(server, media))
             );
 
             const successful = results
@@ -73,27 +85,33 @@ export class TulnexProvider extends BaseProvider {
             return {
                 sources: successful
                     .filter((r) => r !== null)
-                    .map((r) => ({
-                        url: this.createProxyUrl(
-                            r.url,
-                            r.headers ? r.headers : {}
-                        ),
-                        type:
-                            r.url.includes('mkv') || r.url.includes('mp4')
-                                ? 'mp4'
-                                : 'hls',
-                        audioTracks: [
+                    .map((r) =>
+                        tulnexIdentityCatalog.identifySource(
                             {
-                                label: 'Original',
-                                language: 'Original'
+                                url: this.createProxyUrl(
+                                    r.stream.url,
+                                    r.stream.headers ? r.stream.headers : {}
+                                ),
+                                type:
+                                    r.stream.url.includes('mkv') ||
+                                    r.stream.url.includes('mp4')
+                                        ? 'mp4'
+                                        : 'hls',
+                                audioTracks: [
+                                    {
+                                        label: 'Original',
+                                        language: 'Original'
+                                    }
+                                ],
+                                quality: 'Auto'
+                            },
+                            {
+                                familyId: TULNEX_FAMILY_ID,
+                                upstreamId: tulnexUpstreamId(r.leaf),
+                                providerName: this.name
                             }
-                        ],
-                        quality: 'Auto',
-                        provider: {
-                            name: this.name,
-                            id: this.id
-                        }
-                    })),
+                        )
+                    ),
                 subtitles: [],
                 diagnostics: []
             };
@@ -104,7 +122,7 @@ export class TulnexProvider extends BaseProvider {
         }
     }
 
-    private async doScrape(serverName: string, media: ProviderMediaObject) {
+    private async doScrape(serverName: TulnexLeaf, media: ProviderMediaObject) {
         const url =
             media.type === 'movie'
                 ? this.BASE_URL + '/' + serverName + '/movie/' + media.tmdbId
@@ -117,7 +135,7 @@ export class TulnexProvider extends BaseProvider {
                   media.s +
                   '/' +
                   media.e;
-        const req = await fetch(url, {
+        const req = await this.fetchImpl(url, {
             headers: { ...this.HEADERS, Accept: 'application/json, */*' }
         });
         if (!req.ok) {
@@ -127,11 +145,12 @@ export class TulnexProvider extends BaseProvider {
         if (data.payload === undefined) {
             return null;
         }
-        const decrypted = await decryptPayload(data.payload);
+        const decrypted = await this.decryptPayloadImpl(data.payload);
         if (!decrypted) {
             return null;
         }
-        return extractUrl(decrypted);
+        const stream = extractUrl(decrypted);
+        return stream === null ? null : { leaf: serverName, stream };
     }
 
     private emptyResult(message: string): ProviderResult {
@@ -151,7 +170,7 @@ export class TulnexProvider extends BaseProvider {
 
     async healthCheck(): Promise<boolean> {
         try {
-            const response = await fetch(this.BASE_URL, {
+            const response = await this.fetchImpl(this.BASE_URL, {
                 method: 'HEAD',
                 headers: this.HEADERS
             });
