@@ -6,7 +6,7 @@
         "dev": "tsx watch src/server.ts",
         "build": "tsc",
         "start": "npm run build && node dist/server.js",
-        "test": "node scripts/run-tests.mjs && node --test test/provider-catalog.test.mjs",
+        "test": "node scripts/run-tests.mjs && node --test test/*.test.mjs",
         "test:provider": "tsx --test",
         "test:catalog": "node --test test/provider-catalog.test.mjs",
         "catalog:validate": "node scripts/validate-provider-catalog.mjs",
