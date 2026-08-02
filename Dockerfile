@@ -47,6 +47,11 @@ RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/config ./config
 
+# Release managers may stage the Git worktree with a restrictive umask. Keep
+# the runtime image non-root while making static configuration traversable and
+# readable regardless of the source checkout's host-side modes.
+RUN chmod -R a+rX ./config
+
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
