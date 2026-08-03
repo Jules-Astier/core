@@ -5,6 +5,8 @@ import test from 'node:test';
 import { PEACHIFY_LEAVES } from '../src/providers/peachify/peachify.config.js';
 import { POPR_LEAVES } from '../src/providers/popr/popr.config.js';
 import { TULNEX_LEAVES } from '../src/providers/tulnex/tulnex.identity.js';
+import { VIDKING_LEAVES } from '../src/providers/vidking/vidking.identity.js';
+import { VIDLOVE_LEAVES } from '../src/providers/vidlove/vidlove.identity.js';
 import {
     VIDEASY_ACTIVE_SERVERS,
     VIDEASY_DISABLED_LEAVES
@@ -67,7 +69,9 @@ test('implemented aggregator leaf constants have exact catalog coverage', () => 
                 )
             ]
         ],
-        ['peachify', PEACHIFY_LEAVES.map(({ id }) => id)]
+        ['peachify', PEACHIFY_LEAVES.map(({ id }) => id)],
+        ['vidking', VIDKING_LEAVES.map((leaf) => `vidking:${leaf}`)],
+        ['vidlove', VIDLOVE_LEAVES.map((leaf) => `vidlove:${leaf}`)]
     ]);
 
     for (const [familyId, ids] of expected) {
