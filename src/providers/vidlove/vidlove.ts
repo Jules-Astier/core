@@ -63,7 +63,7 @@ function envFlag(name: string, defaultValue: boolean): boolean {
 export class VidLoveProvider extends BaseProvider {
     readonly id = 'vidlove';
     readonly name = 'VidLove';
-    readonly enabled = envFlag('VIDLOVE_ENABLED', false);
+    readonly enabled = envFlag('VIDLOVE_ENABLED', true);
     readonly BASE_URL: string;
     readonly PLAYER_URL: string;
     readonly HEADERS: Record<string, string>;
@@ -130,16 +130,17 @@ export class VidLoveProvider extends BaseProvider {
                 )
                 .map(({ value }) => value);
             const sources = successful.flatMap(({ leaf, response }) =>
-                response.source
-                    ? this.mapSource(leaf, response.source)
-                    : []
+                response.source ? this.mapSource(leaf, response.source) : []
             );
             const subtitles = this.mapSubtitles(successful);
             const failures = settled.length - successful.length;
             const diagnostics: Diagnostic[] = [];
             if (failures > 0) {
                 diagnostics.push({
-                    code: sources.length > 0 ? 'PARTIAL_SCRAPE' : 'PROVIDER_ERROR',
+                    code:
+                        sources.length > 0
+                            ? 'PARTIAL_SCRAPE'
+                            : 'PROVIDER_ERROR',
                     message: `${this.name}: ${failures} upstream resolver(s) were unavailable`,
                     field: '',
                     severity: sources.length > 0 ? 'warning' : 'error'
@@ -228,7 +229,10 @@ export class VidLoveProvider extends BaseProvider {
         leaf: VidLoveLeaf,
         media: ProviderMediaObject
     ): Promise<LeafResult> {
-        const url = new URL(media.type === 'tv' ? '/tv' : '/movie', `${apiUrl}/`);
+        const url = new URL(
+            media.type === 'tv' ? '/tv' : '/movie',
+            `${apiUrl}/`
+        );
         url.searchParams.set('id', media.tmdbId);
         if (media.type === 'tv') {
             url.searchParams.set('season', String(media.s));
@@ -260,7 +264,7 @@ export class VidLoveProvider extends BaseProvider {
         if (!type) return [];
         const mediaUrl =
             type === 'hls'
-                ? bestManifestVariant(input.manifest, input.url) ?? input.url
+                ? (bestManifestVariant(input.manifest, input.url) ?? input.url)
                 : input.url;
         if (!isSafeRemoteUrl(mediaUrl)) return [];
         const headers = {
@@ -270,7 +274,15 @@ export class VidLoveProvider extends BaseProvider {
         return [
             vidLoveIdentityCatalog.identifySource(
                 {
-                    url: this.createProxyUrl(mediaUrl, headers),
+                    url: this.createProxyUrl(
+                        mediaUrl,
+                        headers,
+                        leaf === 'ipcloud'
+                            ? {
+                                  responseTransform: 'strip-png-ts-prefix'
+                              }
+                            : undefined
+                    ),
                     type,
                     quality: sourceQuality(input),
                     audioTracks: [{ language: 'und', label: 'Original' }]
@@ -350,7 +362,9 @@ function supportedSourceType(input: VidLoveSource): SourceType | null {
 
 function sourceQuality(input: VidLoveSource): string {
     if (input.quality?.trim()) return input.quality.trim();
-    const heights = [...(input.manifest ?? '').matchAll(/RESOLUTION=\d+x(\d+)/gi)]
+    const heights = [
+        ...(input.manifest ?? '').matchAll(/RESOLUTION=\d+x(\d+)/gi)
+    ]
         .map((match) => Number.parseInt(match[1], 10))
         .filter(Number.isFinite);
     return heights.length > 0 ? `${Math.max(...heights)}p` : 'Auto';
@@ -404,7 +418,8 @@ function safeHeaders(value: Record<string, unknown> | undefined) {
 }
 
 function subtitleFormat(input: VidLoveSubtitle): SubtitleFormat {
-    const value = `${input.type ?? ''} ${input.format ?? ''} ${input.file ?? ''} ${input.url ?? ''}`.toLowerCase();
+    const value =
+        `${input.type ?? ''} ${input.format ?? ''} ${input.file ?? ''} ${input.url ?? ''}`.toLowerCase();
     if (value.includes('.srt') || /\bsrt\b/.test(value)) return 'srt';
     if (value.includes('.ass') || /\bass\b/.test(value)) return 'ass';
     if (value.includes('.ssa') || /\bssa\b/.test(value)) return 'ssa';

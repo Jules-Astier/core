@@ -8,7 +8,7 @@ import type {
 export class CineSuProvider extends BaseProvider {
     readonly id = 'CineSu';
     readonly name = 'CineSu';
-    readonly enabled = true;
+    readonly enabled = process.env.CINESU_ENABLED === 'true';
     readonly BASE_URL = 'https://cine.su';
     readonly HEADERS = {
         'User-Agent':

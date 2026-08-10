@@ -41,7 +41,7 @@ class VixSrcHttpError extends Error {
 export class VixSrcProvider extends BaseProvider {
     readonly id = 'vixsrc';
     readonly name = 'VixSrc';
-    readonly enabled = true;
+    readonly enabled = process.env.VIXSRC_ENABLED === 'true';
     readonly BASE_URL: string;
     readonly HEADERS: Record<string, string>;
 

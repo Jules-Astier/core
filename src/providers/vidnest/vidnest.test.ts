@@ -8,8 +8,7 @@ import {
     VIDNEST_DENY_ENV,
     VIDNEST_DISABLED_LEAVES,
     VIDNEST_ELIGIBLE_LEAVES,
-    VIDNEST_MISSING_HANDLERS,
-    VIDNEST_REQUESTED_SERVERS
+    VIDNEST_MISSING_HANDLERS
 } from './vidnest.config.js';
 import { VidNestProvider } from './vidnest.js';
 
@@ -58,8 +57,15 @@ function payload(leaf: string, sameUrl: boolean): unknown {
             };
         case 'hollymoviehd':
             return {
-                success: true,
-                sources: [{ file: url, label: '1080p', type: 'hls' }]
+                streams: [
+                    {
+                        headers: { Referer: 'https://holly.invalid/' },
+                        language: 'English',
+                        type: 'hls',
+                        url
+                    }
+                ],
+                totalLanguages: 1
             };
         case 'vidlink':
             return {
@@ -72,7 +78,15 @@ function payload(leaf: string, sameUrl: boolean): unknown {
                         captions: [],
                         flags: [],
                         id: 'fixture',
-                        playlist: url,
+                        qualities: {
+                            '1080': {
+                                headers: {
+                                    Referer: 'https://cdn.vidlink.invalid/'
+                                },
+                                type: 'hls',
+                                url
+                            }
+                        },
                         type: 'hls'
                     }
                 }
@@ -167,6 +181,29 @@ test('maps every eligible handler to exact canonical identity in legacy order', 
     );
 });
 
+test('maps current HollyMovieHD and VidLink schemas with required headers', async () => {
+    const result = await fixtureProvider({
+        environment: {
+            [VIDNEST_ALLOW_ENV]: 'hollymoviehd,vidlink'
+        }
+    }).provider.getMovieSources(movie);
+    const sources = result.sources as IdentifiedSource[];
+    assert.deepEqual(
+        sources.map(({ upstreamId, quality }) => ({ upstreamId, quality })),
+        [
+            { upstreamId: 'vidnest:hollymoviehd', quality: 'Auto' },
+            { upstreamId: 'vidnest:vidlink', quality: '1080' }
+        ]
+    );
+    const payloads = sources.map(({ url }) => {
+        const encoded = new URL(url).searchParams.get('data');
+        assert.ok(encoded);
+        return JSON.parse(encoded);
+    });
+    assert.equal(payloads[0].headers.Referer, 'https://holly.invalid/');
+    assert.equal(payloads[1].headers.Referer, 'https://cdn.vidlink.invalid/');
+});
+
 test('records exact seed-gated missing handlers and disabled delta set', () => {
     assert.deepEqual(VIDNEST_MISSING_HANDLERS, [
         { name: 'catflix', status: 'seed-needed', enabled: false },
@@ -202,7 +239,7 @@ test('keeps identical URLs distinct across eligible leaves', async () => {
     );
 });
 
-test('one failed handler preserves sibling order and missing-handler diagnostics', async () => {
+test('one failed handler preserves sibling order with one partial diagnostic', async () => {
     const result = await fixtureProvider({
         failed: new Set(['purstream'])
     }).provider.getMovieSources(movie);
@@ -214,16 +251,10 @@ test('one failed handler preserves sibling order and missing-handler diagnostics
             (leaf) => `vidnest:${leaf}`
         )
     );
-    assert.equal(result.diagnostics.length, 4);
-    assert.equal(
-        result.diagnostics.filter(({ message }) =>
-            message.includes("we don't have a handler")
-        ).length,
-        3
-    );
+    assert.equal(result.diagnostics.length, 1);
     assert.ok(
         result.diagnostics.some(({ message }) =>
-            message.includes('1/10 upstream requests failed')
+            message.includes('1/7 upstream requests failed')
         )
     );
     const serialized = JSON.stringify(result.diagnostics);
@@ -255,14 +286,14 @@ test('one malformed fulfilled handler preserves good siblings and redacts parser
 
 test('all failed requests report the exact failed count without raw errors', async () => {
     const result = await fixtureProvider({
-        failed: new Set(VIDNEST_REQUESTED_SERVERS)
+        failed: new Set(VIDNEST_ELIGIBLE_LEAVES)
     }).provider.getMovieSources(movie);
     assert.equal(result.sources.length, 0);
     assert.equal(result.diagnostics.length, 1);
     assert.match(
         result.diagnostics[0]?.message ?? '',
         new RegExp(
-            `${VIDNEST_REQUESTED_SERVERS.length}/${VIDNEST_REQUESTED_SERVERS.length} upstream requests failed`
+            `${VIDNEST_ELIGIBLE_LEAVES.length}/${VIDNEST_ELIGIBLE_LEAVES.length} upstream requests failed`
         )
     );
     assert.equal(result.diagnostics[0]?.severity, 'error');
@@ -284,7 +315,7 @@ test('allow and deny switches isolate eligible requests and deny wins', async ()
     );
     assert.deepEqual(
         requests.map((url) => new URL(url).pathname.split('/')[1]),
-        ['moviebox', 'catflix', 'lamda', 'flixhq', 'klikxxi']
+        ['moviebox', 'klikxxi']
     );
 });
 
@@ -311,7 +342,7 @@ test('startup validation rejects ineligible, unknown, and duplicate leaves witho
     );
 });
 
-test('unset switches retain registry identity, ten requests, headers, and missing warnings', async () => {
+test('unset test switches request only implemented eligible leaves', async () => {
     const { provider, requests } = fixtureProvider();
     assert.deepEqual(
         { id: provider.id, name: provider.name, enabled: provider.enabled },
@@ -320,9 +351,9 @@ test('unset switches retain registry identity, ten requests, headers, and missin
     const result = await provider.getMovieSources(movie);
     assert.deepEqual(
         requests.map((url) => new URL(url).pathname.split('/')[1]),
-        VIDNEST_REQUESTED_SERVERS
+        VIDNEST_ELIGIBLE_LEAVES
     );
-    assert.equal(result.diagnostics.length, 3);
+    assert.equal(result.diagnostics.length, 0);
     const moviebox = (result.sources as IdentifiedSource[]).find(
         ({ upstreamId }) => upstreamId === 'vidnest:moviebox'
     );

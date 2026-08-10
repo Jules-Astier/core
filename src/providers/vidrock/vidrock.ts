@@ -14,7 +14,7 @@ const PROXY_PREFIX = 'https://proxy.vidrock.store/';
 export class VidRockProvider extends BaseProvider {
     readonly id = 'vidrock';
     readonly name = 'VidRock';
-    readonly enabled = true;
+    readonly enabled = process.env.VIDROCK_ENABLED === 'true';
     readonly BASE_URL = 'https://vidrock.net/';
     readonly SUB_BASE_URL = 'https://sub.vdrk.site';
     readonly HEADERS = {

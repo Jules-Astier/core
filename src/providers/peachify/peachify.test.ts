@@ -182,7 +182,7 @@ test('preserves registry identity, request headers, source headers, and source t
     });
     assert.deepEqual(
         { id: provider.id, name: provider.name, enabled: provider.enabled },
-        { id: 'Peachify', name: 'Peachify', enabled: true }
+        { id: 'Peachify', name: 'Peachify', enabled: false }
     );
     const result = await provider.getMovieSources(movie);
     assert.deepEqual(requests[0]?.headers, provider.HEADERS);

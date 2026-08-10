@@ -56,5 +56,9 @@ export interface VideasyApiParams {
 export interface VideasyServer {
     readonly name: string;
     readonly url: string;
-    readonly language?: string;
+    readonly language: string;
+    readonly languageLabel: string;
+    readonly requestLanguage?: string;
+    readonly qualityFilter?: string;
+    readonly hlsOnly?: boolean;
 }

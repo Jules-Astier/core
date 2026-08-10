@@ -2,96 +2,72 @@ import type { VideasyServer } from './videasy.types.js';
 import { allowedByBoth, globalLeafSwitch } from '../provider-leaf-switches.js';
 
 export const VIDEASY_FAMILY_ID = 'videasy';
+const API_BASE_URL = 'https://api.speedracelight.com';
 
 export const VIDEASY_ACTIVE_SERVERS = [
     {
-        name: 'cuevana',
-        url: 'https://api2.videasy.net/cuevana/sources-with-title',
-        language: 'english'
-    },
-    {
-        name: 'mb-flix',
-        url: 'https://api.videasy.net/mb-flix/sources-with-title',
-        language: 'english'
-    },
-    {
-        name: '1movies',
-        url: 'https://api.videasy.net/1movies/sources-with-title',
-        language: 'english'
-    },
-    {
         name: 'cdn',
-        url: 'https://api.videasy.net/cdn/sources-with-title',
-        language: 'english'
+        url: `${API_BASE_URL}/cdn/sources-with-title`,
+        language: 'en',
+        languageLabel: 'English'
     },
     {
-        name: 'superflix',
-        url: 'https://api.videasy.net/superflix/sources-with-title',
-        language: 'english'
+        name: 'm4uhd',
+        url: `${API_BASE_URL}/m4uhd/sources-with-title`,
+        language: 'en',
+        languageLabel: 'English'
+    },
+    {
+        name: 'hdmovie',
+        url: `${API_BASE_URL}/hdmovie/sources-with-title`,
+        language: 'mul',
+        languageLabel: 'Multi'
+    },
+    {
+        name: 'meine-de',
+        url: `${API_BASE_URL}/meine/sources-with-title`,
+        language: 'de',
+        languageLabel: 'German',
+        requestLanguage: 'german'
     },
     {
         name: 'lamovie',
-        url: 'https://api.videasy.net/lamovie/sources-with-title',
-        language: 'english'
+        url: `${API_BASE_URL}/lamovie/sources-with-title`,
+        language: 'es',
+        languageLabel: 'Spanish'
+    },
+    {
+        name: 'superflix',
+        url: `${API_BASE_URL}/superflix/sources-with-title`,
+        language: 'pt',
+        languageLabel: 'Portuguese'
     }
 ] as const satisfies readonly VideasyServer[];
 
 export const VIDEASY_DISABLED_LEAVES = [
-    {
-        name: 'primesrcme',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized seed required'
-    },
-    {
-        name: 'm4uhd',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized seed required'
-    },
-    {
-        name: 'meine-de',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized German seed required'
-    },
-    {
-        name: 'meine-it',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized Italian seed required'
-    },
-    {
-        name: 'meine-fr',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized French seed required'
-    },
-    {
-        name: 'overflix',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized seed required'
-    },
-    {
-        name: 'visioncine',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized seed required'
-    },
-    {
-        name: 'hdmovie',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized seed required; quality may contain a language label'
-    },
-    {
-        name: 'primewire',
-        status: 'seed-needed',
-        enabled: false,
-        reason: 'authorized seed required'
-    }
+    { name: 'primesrcme', status: 'seed-needed', enabled: false },
+    { name: 'overflix', status: 'seed-needed', enabled: false },
+    { name: 'visioncine', status: 'seed-needed', enabled: false },
+    { name: 'meine-it', status: 'seed-needed', enabled: false },
+    { name: 'meine-fr', status: 'seed-needed', enabled: false },
+    { name: 'primewire', status: 'seed-needed', enabled: false }
 ] as const;
+
+export const VIDEASY_RETIRED_LEAVES = [
+    { name: 'cuevana', status: 'retired', enabled: false },
+    { name: 'mb-flix', status: 'retired', enabled: false },
+    { name: '1movies', status: 'retired', enabled: false }
+] as const;
+
+const LEGACY_ALIASES: Readonly<Record<string, string>> = {
+    yoru: 'cdn',
+    breach: 'm4uhd',
+    killjoy: 'meine-de',
+    vyse: 'hdmovie',
+    fade: 'hdmovie',
+    omen: 'lamovie',
+    raze: 'superflix'
+};
 
 export type VideasyLeafEnvironment = Readonly<
     Partial<Record<'VIDEASY_LEAF_ALLOWLIST' | 'VIDEASY_LEAF_DENYLIST', string>>
@@ -133,9 +109,10 @@ function parseLeafList(name: string, raw: string | undefined): Set<string> {
         .split(',')
         .map((value) => {
             const normalized = value.trim().toLowerCase();
-            return normalized.startsWith('videasy:')
+            const leaf = normalized.startsWith('videasy:')
                 ? normalized.slice('videasy:'.length)
                 : normalized;
+            return LEGACY_ALIASES[leaf] ?? leaf;
         })
         .filter(Boolean);
     const unique = new Set(values);
@@ -146,12 +123,14 @@ function parseLeafList(name: string, raw: string | undefined): Set<string> {
         VIDEASY_ACTIVE_SERVERS.map(({ name: leaf }) => leaf)
     );
     const disabled = new Set<string>(
-        VIDEASY_DISABLED_LEAVES.map(({ name: leaf }) => leaf)
+        [...VIDEASY_DISABLED_LEAVES, ...VIDEASY_RETIRED_LEAVES].map(
+            ({ name: leaf }) => leaf
+        )
     );
     for (const value of unique) {
         if (disabled.has(value)) {
             throw new TypeError(
-                `${name} references a disabled Videasy leaf; an authorized seed review is required`
+                `${name} references a retired or seed-gated Videasy leaf`
             );
         }
         if (!active.has(value)) {

@@ -46,10 +46,12 @@ export interface Subtitle {
 }
 
 // hollymoviehd
-export interface hollymoviehdResponse {
-    sources: hollymoviehdSource[];
-    success: boolean;
-}
+export type hollymoviehdResponse =
+    | allmoviesResponse
+    | {
+          sources: hollymoviehdSource[];
+          success: boolean;
+      };
 
 export interface hollymoviehdSource {
     file: string;
@@ -74,8 +76,15 @@ export interface vidlinkStream {
     captions: Caption[];
     flags: string[];
     id: string;
-    playlist: string;
+    playlist?: string;
+    qualities?: Record<string, vidlinkQuality>;
     type: string;
+}
+
+export interface vidlinkQuality {
+    headers?: Record<string, string>;
+    type?: string;
+    url: string;
 }
 
 export interface Caption {

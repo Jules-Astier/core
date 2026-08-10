@@ -9,7 +9,8 @@ import { VIDKING_LEAVES } from '../src/providers/vidking/vidking.identity.js';
 import { VIDLOVE_LEAVES } from '../src/providers/vidlove/vidlove.identity.js';
 import {
     VIDEASY_ACTIVE_SERVERS,
-    VIDEASY_DISABLED_LEAVES
+    VIDEASY_DISABLED_LEAVES,
+    VIDEASY_RETIRED_LEAVES
 } from '../src/providers/videasy/videasy.config.js';
 import {
     VIDNEST_DISABLED_LEAVES,
@@ -33,10 +34,7 @@ const catalog = JSON.parse(
 
 function catalogLeaves(familyId: string) {
     return catalog.entries
-        .filter(
-            (entry) =>
-                entry.familyId === familyId && entry.id !== familyId
-        )
+        .filter((entry) => entry.familyId === familyId && entry.id !== familyId)
         .sort((left, right) => left.id.localeCompare(right.id));
 }
 
@@ -46,27 +44,20 @@ test('implemented aggregator leaf constants have exact catalog coverage', () => 
         [
             'videasy',
             [
-                ...VIDEASY_ACTIVE_SERVERS.map(
-                    ({ name }) => `videasy:${name}`
-                ),
-                ...VIDEASY_DISABLED_LEAVES.map(
-                    ({ name }) => `videasy:${name}`
-                )
+                ...VIDEASY_ACTIVE_SERVERS.map(({ name }) => `videasy:${name}`),
+                ...VIDEASY_DISABLED_LEAVES.map(({ name }) => `videasy:${name}`),
+                ...VIDEASY_RETIRED_LEAVES.map(({ name }) => `videasy:${name}`)
             ]
         ],
         ['popr', POPR_LEAVES.map(({ id }) => id)],
         [
             'vidnest',
             [
-                ...VIDNEST_ELIGIBLE_LEAVES.map(
-                    (leaf) => `vidnest:${leaf}`
-                ),
+                ...VIDNEST_ELIGIBLE_LEAVES.map((leaf) => `vidnest:${leaf}`),
                 ...VIDNEST_MISSING_HANDLERS.map(
                     ({ name }) => `vidnest:${name}`
                 ),
-                ...VIDNEST_DISABLED_LEAVES.map(
-                    ({ name }) => `vidnest:${name}`
-                )
+                ...VIDNEST_DISABLED_LEAVES.map(({ name }) => `vidnest:${name}`)
             ]
         ],
         ['peachify', PEACHIFY_LEAVES.map(({ id }) => id)],

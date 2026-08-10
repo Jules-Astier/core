@@ -7,9 +7,9 @@ export interface EncryptedPayload {
 export interface ApiResponse {
     status: string;
     requested: Requested;
-    selected: Selected;
-    switches: Switch[];
-    stream: Stream;
+    selected?: Selected;
+    switches?: Switch[];
+    stream?: Stream;
     source: Source;
 }
 

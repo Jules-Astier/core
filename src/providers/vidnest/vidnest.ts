@@ -16,6 +16,7 @@ import {
     VIDNEST_ELIGIBLE_LEAVES,
     VIDNEST_FAMILY_ID,
     VIDNEST_REQUESTED_SERVERS,
+    VIDNEST_LEAF_POLICY,
     type VidnestLeaf,
     type VidnestLeafEnvironment,
     type VidnestLeafPolicy
@@ -105,7 +106,7 @@ export class VidNestProvider extends BaseProvider {
             parse: (d) => this.decryptImpl<allmoviesResponse>(d),
             mapSources: (root) =>
                 root.streams.map((s) => ({
-                    url: this.createProxyUrl(s.url),
+                    url: this.createProxyUrl(s.url, s.headers),
                     type: this.inferSourceType(s.type, s.url),
                     quality: 'Auto',
                     audioTracks: [{ language: s.language, label: s.language }],
@@ -136,33 +137,63 @@ export class VidNestProvider extends BaseProvider {
         hollymoviehd: {
             parse: (d) => this.decryptImpl<hollymoviehdResponse>(d),
             mapSources: (root) =>
-                root.sources.map((s) => ({
-                    url: this.createProxyUrl(s.file),
-                    type: this.inferSourceType(s.type, s.file),
-                    quality: s.label,
-                    audioTracks: [{ language: 'English', label: 'eng' }],
-                    ...this.identity('hollymoviehd')
-                })),
+                'streams' in root
+                    ? root.streams.map((s) => ({
+                          url: this.createProxyUrl(s.url, s.headers),
+                          type: this.inferSourceType(s.type, s.url),
+                          quality: 'Auto',
+                          audioTracks: [
+                              {
+                                  language: s.language,
+                                  label: s.language
+                              }
+                          ],
+                          ...this.identity('hollymoviehd')
+                      }))
+                    : root.sources.map((s) => ({
+                          url: this.createProxyUrl(s.file),
+                          type: this.inferSourceType(s.type, s.file),
+                          quality: s.label,
+                          audioTracks: [{ language: 'English', label: 'eng' }],
+                          ...this.identity('hollymoviehd')
+                      })),
             mapSubtitles: () => []
         },
 
         vidlink: {
             parse: (d) => this.decryptImpl<vidlinkResponse>(d),
-            mapSources: (root) => [
-                {
-                    url: this.createProxyUrl(
-                        root.data.stream.playlist,
-                        root.headers
-                    ),
-                    type: this.inferSourceType(
-                        root.data.stream.type,
-                        root.data.stream.playlist
-                    ),
-                    quality: 'Auto',
+            mapSources: (root) => {
+                const stream = root.data.stream;
+                const variants = stream.qualities
+                    ? Object.entries(stream.qualities).map(
+                          ([quality, value]) => ({
+                              quality,
+                              url: value.url,
+                              type: value.type ?? stream.type,
+                              headers: {
+                                  ...root.headers,
+                                  ...(value.headers ?? {})
+                              }
+                          })
+                      )
+                    : stream.playlist
+                      ? [
+                            {
+                                quality: 'Auto',
+                                url: stream.playlist,
+                                type: stream.type,
+                                headers: root.headers
+                            }
+                        ]
+                      : [];
+                return variants.map((variant) => ({
+                    url: this.createProxyUrl(variant.url, variant.headers),
+                    type: this.inferSourceType(variant.type, variant.url),
+                    quality: variant.quality,
                     audioTracks: [{ language: 'English', label: 'eng' }],
                     ...this.identity('vidlink')
-                }
-            ],
+                }));
+            },
             mapSubtitles: (root) =>
                 root.data.stream.captions.map((c) => ({
                     url: this.createProxyUrl(c.url, root.headers),
@@ -223,10 +254,12 @@ export class VidNestProvider extends BaseProvider {
         super();
         this.leafPolicy =
             dependencies.leafPolicy ??
-            createVidnestLeafPolicy(dependencies.environment ?? process.env);
+            (dependencies.environment
+                ? createVidnestLeafPolicy(dependencies.environment)
+                : VIDNEST_LEAF_POLICY);
         this.SERVERS = VIDNEST_REQUESTED_SERVERS.filter(
             (path) =>
-                !VIDNEST_ELIGIBLE_LEAVES.includes(path as VidnestLeaf) ||
+                VIDNEST_ELIGIBLE_LEAVES.includes(path as VidnestLeaf) &&
                 this.leafPolicy.enabled(path as VidnestLeaf)
         ).map((path) => ({
             path,

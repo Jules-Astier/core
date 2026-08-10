@@ -56,17 +56,20 @@ const episode = {
 function proxyPayload(url: string): {
     url: string;
     headers: Record<string, string>;
+    responseTransform?: 'strip-png-ts-prefix';
 } {
     const encoded = new URL(url).searchParams.get('data');
     assert.ok(encoded, 'proxy URL must contain data');
     return JSON.parse(encoded);
 }
 
-function fixtureProvider(options: {
-    policy?: ReturnType<typeof createVidLoveLeafPolicy>;
-    missingLeaf?: string;
-    failedLeaf?: string;
-} = {}) {
+function fixtureProvider(
+    options: {
+        policy?: ReturnType<typeof createVidLoveLeafPolicy>;
+        missingLeaf?: string;
+        failedLeaf?: string;
+    } = {}
+) {
     const requests: URL[] = [];
     const fetchFixture: typeof fetch = async (input) => {
         const url = new URL(String(input));
@@ -105,8 +108,7 @@ function fixtureProvider(options: {
             apiUrl: API_URL,
             fetch: fetchFixture,
             leafPolicy:
-                options.policy ??
-                createVidLoveLeafPolicy(Object.create(null))
+                options.policy ?? createVidLoveLeafPolicy(Object.create(null))
         }),
         requests
     };
@@ -156,6 +158,14 @@ test('maps every VidLove source leaf to a stable direct-HLS identity', async () 
     assert.equal(source.headers.Referer, `${PLAYER_URL}/`);
     assert.equal(source.headers.Origin, PLAYER_URL);
     assert.equal(source.headers.Cookie, undefined);
+    const ipcloudSource = (result.sources as IdentifiedSource[]).find(
+        ({ upstreamId }) => upstreamId === 'vidlove:ipcloud'
+    );
+    assert.ok(ipcloudSource);
+    assert.equal(
+        proxyPayload(ipcloudSource.url).responseTransform,
+        'strip-png-ts-prefix'
+    );
 });
 
 test('constructs the TV route with season and episode', async () => {
@@ -173,6 +183,28 @@ test('constructs the TV route with season and episode', async () => {
     assert.equal(requests[0].searchParams.get('id'), '1396');
     assert.equal(requests[0].searchParams.get('season'), '1');
     assert.equal(requests[0].searchParams.get('episode'), '1');
+});
+
+test('normalization is scoped to IPCloud and the provider is enabled by default', async () => {
+    const policy = createVidLoveLeafPolicy({
+        [VIDLOVE_ALLOW_ENV]: 'moviebox,ipcloud'
+    });
+    const { provider } = fixtureProvider({ policy });
+    const result = await provider.getMovieSources(movie);
+    const sources = result.sources as IdentifiedSource[];
+    const moviebox = sources.find(
+        ({ upstreamId }) => upstreamId === 'vidlove:moviebox'
+    );
+    const ipcloud = sources.find(
+        ({ upstreamId }) => upstreamId === 'vidlove:ipcloud'
+    );
+    assert.ok(moviebox && ipcloud);
+    assert.equal(provider.enabled, true);
+    assert.equal(proxyPayload(moviebox.url).responseTransform, undefined);
+    assert.equal(
+        proxyPayload(ipcloud.url).responseTransform,
+        'strip-png-ts-prefix'
+    );
 });
 
 test('discovers the current API origin from the public player bundle', async () => {
@@ -235,7 +267,9 @@ test('missing content is not treated as an upstream failure', async () => {
         (result.sources[0] as IdentifiedSource).upstreamId,
         'vidlove:ipcloud'
     );
-    assert.ok(!result.diagnostics.some(({ code }) => code === 'PARTIAL_SCRAPE'));
+    assert.ok(
+        !result.diagnostics.some(({ code }) => code === 'PARTIAL_SCRAPE')
+    );
 });
 
 test('one failed request preserves successful siblings with redacted diagnostics', async () => {
