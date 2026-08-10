@@ -26,7 +26,7 @@ type TulnexDependencies = {
 export class TulnexProvider extends BaseProvider {
     readonly id = 'tulnex';
     readonly name = 'Tulnex';
-    readonly enabled = true;
+    readonly enabled = process.env.TULNEX_ENABLED === 'true';
 
     readonly BASE_URL = 'https://api.tulnex.com';
     readonly HEADERS = {

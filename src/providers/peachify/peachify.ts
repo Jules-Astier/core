@@ -45,7 +45,7 @@ export type PeachifyDependencies = {
 export class PeachifyProvider extends BaseProvider {
     readonly id = 'Peachify';
     readonly name = 'Peachify';
-    readonly enabled = true;
+    readonly enabled = process.env.PEACHIFY_ENABLED === 'true';
     readonly BASE_URL = 'https://peachify.top';
     readonly MOVIEBOX_URL = 'https://uwu.eat-peach.sbs';
     readonly API_URL = 'https://usa.eat-peach.sbs';

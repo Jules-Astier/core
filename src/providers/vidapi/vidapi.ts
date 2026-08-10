@@ -13,7 +13,7 @@ import { VidApiResponse } from './vidapi.types.js';
 export class VidApiProvider extends BaseProvider {
     readonly id = 'vidapi';
     readonly name = 'VidApi';
-    readonly enabled = true;
+    readonly enabled = process.env.VIDAPI_ENABLED === 'true';
     readonly BASE_URL = 'https://vaplayer.ru';
     readonly IFRAME_URL = 'https://brightpathsignals.com';
     readonly API_URL = 'https://streamdata.vaplayer.ru/api.php';

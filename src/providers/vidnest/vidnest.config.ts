@@ -101,5 +101,9 @@ function parseList(
 }
 
 // Validate deployment configuration when the provider module is loaded.
-export const VIDNEST_LEAF_POLICY = createVidnestLeafPolicy(process.env);
+export const VIDNEST_LEAF_POLICY = createVidnestLeafPolicy({
+    ...process.env,
+    [VIDNEST_ALLOW_ENV]:
+        process.env[VIDNEST_ALLOW_ENV]?.trim() || 'hollymoviehd'
+});
 import { allowedByBoth, globalLeafSwitch } from '../provider-leaf-switches.js';

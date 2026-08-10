@@ -1,12 +1,26 @@
-import { BaseProvider, type Subtitle, type SourceType } from '@omss/framework';
+import { BaseProvider } from '@omss/framework';
 import type {
     ProviderCapabilities,
     ProviderMediaObject,
     ProviderResult,
-    Source
+    Source,
+    Subtitle
 } from '@omss/framework';
-import type { StreamResponse } from './vidzee.types.js';
-import { decrypt, deriveKey } from './decrypt.js';
+import { decryptVidZeeStream, type VidZeeDecodedStream } from './decrypt.js';
+import type {
+    VidZeeEncryptedResponse,
+    VidZeeSubtitle
+} from './vidzee.types.js';
+
+const SERVERS = ['ipcloud', 'dcloud', 'tik'] as const;
+
+export type VidZeeDependencies = {
+    fetch?: typeof fetch;
+    decrypt?: (
+        encoded: string,
+        hostname?: string
+    ) => Promise<VidZeeDecodedStream | null>;
+};
 
 export class VidZeeProvider extends BaseProvider {
     readonly id = 'vidzee';
@@ -16,10 +30,10 @@ export class VidZeeProvider extends BaseProvider {
     readonly PLAYER_URL = 'https://player.vidzee.wtf';
     readonly HEADERS = {
         'User-Agent':
-            'Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.7051.98 Safari/537.36',
-        Accept: 'application/json, text/javascript, */*; q=0.01',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/138 Safari/537.36',
+        Accept: 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
-        Referer: this.PLAYER_URL,
+        Referer: `${this.PLAYER_URL}/`,
         Origin: this.PLAYER_URL
     };
 
@@ -27,227 +41,188 @@ export class VidZeeProvider extends BaseProvider {
         supportedContentTypes: ['movies', 'tv']
     };
 
-    /**
-     * Fetch movie sources
-     */
+    private readonly fetchImpl: typeof fetch;
+    private readonly decryptImpl: NonNullable<VidZeeDependencies['decrypt']>;
+
+    constructor(dependencies: VidZeeDependencies = {}) {
+        super();
+        this.fetchImpl = dependencies.fetch ?? fetch;
+        this.decryptImpl = dependencies.decrypt ?? decryptVidZeeStream;
+    }
+
     async getMovieSources(media: ProviderMediaObject): Promise<ProviderResult> {
-        return this.getSources(media, { type: 'movie' });
+        return this.getSources(media);
     }
 
-    /**
-     * Fetch TV episode sources
-     */
     async getTVSources(media: ProviderMediaObject): Promise<ProviderResult> {
-        return this.getSources(media, {
-            type: 'tv',
-            season: media.s?.toString(),
-            episode: media.e?.toString()
-        });
+        return this.getSources(media);
     }
 
-    /**
-     * Main scraping logic - Parallel servers + FULL parallel decryption
-     */
     private async getSources(
-        media: ProviderMediaObject,
-        params: { type: 'movie' | 'tv'; season?: string; episode?: string }
-    ): Promise<ProviderResult> {
-        try {
-            const tmdbId = media.tmdbId;
-
-            const decKey = await this.fetchDecryptionKey();
-            if (!decKey) {
-                return this.emptyResult(
-                    'Failed to fetch decryption key',
-                    media
-                );
-            }
-
-            const serverPromises = Array.from({ length: 14 }, (_, serverId) =>
-                this.fetchServer(tmdbId, serverId, params)
-            );
-
-            const results = await Promise.allSettled(serverPromises);
-            const successfulResponses: StreamResponse[] = [];
-
-            for (const result of results) {
-                if (result.status === 'fulfilled' && result.value) {
-                    successfulResponses.push(result.value);
-                }
-            }
-
-            if (successfulResponses.length === 0) {
-                return this.emptyResult('No working servers', media);
-            }
-
-            const decryptPromises = successfulResponses.map((response) =>
-                Promise.all(
-                    response.url.map((u) => decrypt(u.link, decKey))
-                ).then((decryptedLinks) => ({
-                    response,
-                    decryptedLinks
-                }))
-            );
-            const decryptionResults = await Promise.all(decryptPromises);
-
-            const allDecryptedLinks: string[] = [];
-            const allSubtitles = new Map<string, Subtitle>();
-
-            for (const { response, decryptedLinks } of decryptionResults) {
-                allDecryptedLinks.push(...decryptedLinks);
-
-                for (const track of response.tracks) {
-                    if (track.url && track.lang) {
-                        const proxySubUrl = this.createProxyUrl(
-                            track.url,
-                            this.HEADERS
-                        );
-                        const subKey = `${track.lang}_${response.serverInfo.number}`;
-
-                        if (!allSubtitles.has(subKey)) {
-                            allSubtitles.set(subKey, {
-                                url: proxySubUrl,
-                                label: track.lang.replace(/\d+/g, '').trim(),
-                                format: 'vtt'
-                            });
-                        }
-                    }
-                }
-            }
-
-            const uniqueLinks = [...new Set(allDecryptedLinks)].filter(
-                (link) => link && link.startsWith('http')
-            );
-
-            const sources: Source[] = uniqueLinks.map((link) => ({
-                url: this.createProxyUrl(
-                    link,
-                    link.includes('fast33lane')
-                        ? {
-                              referer: 'https://rapidairmax.site/',
-                              origin: 'https://rapidairmax.site'
-                          }
-                        : link.includes('serversicuro.cc')
-                          ? {}
-                          : {
-                                ...this.HEADERS,
-                                Referer: `${this.BASE_URL}/`
-                            }
-                ),
-                type: 'hls' as SourceType,
-                quality: this.inferQuality(link),
-                audioTracks: [
-                    link.includes('phim1280.tv')
-                        ? {
-                              language: 'vie',
-                              label: 'Vietnamese'
-                          }
-                        : {
-                              language: 'eng',
-                              label: 'English'
-                          }
-                ],
-                provider: {
-                    id: this.id,
-                    name: this.name
-                }
-            }));
-
-            return {
-                sources,
-                subtitles: Array.from(allSubtitles.values()),
-                diagnostics: []
-            };
-        } catch (error) {
-            return this.emptyResult(
-                error instanceof Error ? error.message : 'Unknown error',
-                media
-            );
-        }
-    }
-
-    /**
-     * Fetch single server response
-     */
-    private async fetchServer(
-        tmdbId: string,
-        serverId: number,
-        params: { type: 'movie' | 'tv'; season?: string; episode?: string }
-    ): Promise<StreamResponse | null> {
-        try {
-            let url =
-                this.PLAYER_URL + `/api/server?id=${tmdbId}&sr=${serverId}`;
-
-            if (params.type === 'tv' && params.season && params.episode) {
-                url += `&ss=${params.season}&ep=${params.episode}`;
-            }
-
-            const response = await fetch(url, {
-                headers: this.HEADERS
-            });
-
-            if (!response.ok) {
-                return null;
-            }
-
-            return (await response.json()) as StreamResponse;
-        } catch {
-            return null;
-        }
-    }
-
-    private async fetchDecryptionKey(): Promise<string | null> {
-        try {
-            const response = await fetch(`${this.BASE_URL}/api-key`, {
-                headers: this.HEADERS
-            });
-
-            if (response.status === 200) {
-                const data = await response.text();
-                if (data) {
-                    return await deriveKey(data);
-                }
-            }
-
-            return null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Return empty result with diagnostic
-     */
-    private emptyResult(
-        message: string,
         media: ProviderMediaObject
-    ): ProviderResult {
-        return {
-            sources: [],
-            subtitles: [],
-            diagnostics: [
-                {
-                    code: 'PROVIDER_ERROR',
-                    message: `${this.name}: ${message}`,
-                    field: '',
-                    severity: 'error'
-                }
-            ]
-        };
+    ): Promise<ProviderResult> {
+        const settled = await Promise.allSettled(
+            SERVERS.map((server) => this.resolveServer(media, server))
+        );
+        const sources: Source[] = [];
+        let failures = 0;
+        for (const result of settled) {
+            if (result.status !== 'fulfilled' || !result.value) {
+                failures += 1;
+                continue;
+            }
+            const decoded = result.value;
+            const headers = safeHeaders(decoded.headers);
+            sources.push({
+                url: this.createProxyUrl(decoded.url, headers),
+                type: decoded.url.toLowerCase().includes('.mp4')
+                    ? 'mp4'
+                    : 'hls',
+                quality: 'Auto',
+                audioTracks: [audioTrack(decoded.language)],
+                provider: { id: this.id, name: this.name }
+            });
+        }
+
+        const unique = [
+            ...new Map(sources.map((source) => [source.url, source])).values()
+        ];
+        const subtitles = await this.fetchSubtitles(media);
+        const diagnostics: ProviderResult['diagnostics'] = [];
+        if (failures > 0 && unique.length > 0) {
+            diagnostics.push({
+                code: 'PARTIAL_SCRAPE',
+                message: `${this.name}: ${failures}/${SERVERS.length} stream servers were unavailable`,
+                field: '',
+                severity: 'warning'
+            });
+        }
+        if (unique.length === 0) {
+            diagnostics.push({
+                code: 'PROVIDER_ERROR',
+                message: `${this.name}: no working stream servers`,
+                field: '',
+                severity: 'error'
+            });
+        }
+        return { sources: unique, subtitles, diagnostics };
     }
 
-    /**
-     * Health check
-     */
+    private async resolveServer(
+        media: ProviderMediaObject,
+        server: (typeof SERVERS)[number]
+    ): Promise<VidZeeDecodedStream | null> {
+        const response = await this.fetchImpl(this.streamUrl(media, server), {
+            headers: this.HEADERS,
+            signal: AbortSignal.timeout(8_000)
+        });
+        if (!response.ok) return null;
+        const payload = (await response.json()) as VidZeeEncryptedResponse;
+        if (typeof payload.url === 'string') {
+            return {
+                url: payload.url,
+                language: payload.language,
+                headers: payload.headers
+            };
+        }
+        return typeof payload.c === 'string'
+            ? this.decryptImpl(payload.c, new URL(this.PLAYER_URL).hostname)
+            : null;
+    }
+
+    private streamUrl(
+        media: ProviderMediaObject,
+        server: (typeof SERVERS)[number]
+    ): string {
+        const path =
+            media.type === 'movie'
+                ? `/streams/movie/${encodeURIComponent(media.tmdbId)}`
+                : `/streams/tv/${encodeURIComponent(media.tmdbId)}/${media.s}/${media.e}`;
+        return `${this.BASE_URL}${path}?${new URLSearchParams({
+            s: server,
+            e: '1'
+        })}`;
+    }
+
+    private async fetchSubtitles(
+        media: ProviderMediaObject
+    ): Promise<Subtitle[]> {
+        const path =
+            media.type === 'movie'
+                ? `/subs/movie/${encodeURIComponent(media.tmdbId)}`
+                : `/subs/tv/${encodeURIComponent(media.tmdbId)}/${media.s}/${media.e}`;
+        try {
+            const response = await this.fetchImpl(`${this.BASE_URL}${path}`, {
+                headers: this.HEADERS,
+                signal: AbortSignal.timeout(8_000)
+            });
+            if (!response.ok) return [];
+            const entries = (await response.json()) as VidZeeSubtitle[];
+            if (!Array.isArray(entries)) return [];
+            return entries
+                .filter(
+                    (entry) =>
+                        typeof entry.file === 'string' &&
+                        entry.file.startsWith('https://')
+                )
+                .map((entry) => ({
+                    url: this.createProxyUrl(entry.file!, this.HEADERS),
+                    label: entry.label?.trim() || 'Unknown',
+                    format: subtitleFormat(entry.file!)
+                }));
+        } catch {
+            return [];
+        }
+    }
+
     async healthCheck(): Promise<boolean> {
         try {
-            const response = await fetch(this.BASE_URL, {
+            const response = await this.fetchImpl(this.PLAYER_URL, {
                 method: 'HEAD',
-                headers: this.HEADERS
+                headers: this.HEADERS,
+                signal: AbortSignal.timeout(5_000)
             });
-            return response.status === 200;
+            return response.ok;
         } catch {
             return false;
         }
     }
+}
+
+function safeHeaders(value: Record<string, string> | undefined) {
+    const allowed = new Set([
+        'accept',
+        'accept-language',
+        'origin',
+        'referer',
+        'user-agent'
+    ]);
+    return Object.fromEntries(
+        Object.entries(value ?? {}).filter(
+            ([name, entry]) =>
+                allowed.has(name.toLowerCase()) && typeof entry === 'string'
+        )
+    );
+}
+
+function audioTrack(language: string | undefined) {
+    const value = language?.trim() || 'Auto';
+    const normalized = value.toLowerCase();
+    const codes: Record<string, string> = {
+        auto: 'und',
+        english: 'eng',
+        hindi: 'hin',
+        vietnamese: 'vie'
+    };
+    return {
+        language: codes[normalized] ?? normalized.slice(0, 3),
+        label: value
+    };
+}
+
+function subtitleFormat(url: string): 'vtt' | 'srt' | 'ass' {
+    const pathname = new URL(url).pathname.toLowerCase();
+    if (pathname.endsWith('.srt')) return 'srt';
+    if (pathname.endsWith('.ass') || pathname.endsWith('.ssa')) return 'ass';
+    return 'vtt';
 }

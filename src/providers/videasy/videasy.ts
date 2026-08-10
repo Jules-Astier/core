@@ -32,21 +32,24 @@ export type VideasyDependencies = {
     readonly fetch?: typeof fetch;
     readonly decrypt?: (
         blob: string,
+        seed: string,
         tmdbId: string
-    ) => Promise<DecryptedPayload | null>;
+    ) => DecryptedPayload | null;
 };
+
+type SeedEntry = { seed: string; expiresAt: number };
 
 export class VideasyProvider extends BaseProvider {
     readonly id = 'Videasy';
     readonly name = 'Videasy';
     readonly enabled = true;
-    readonly BASE_URL = 'https://api.videasy.net';
+    readonly BASE_URL = 'https://api.speedracelight.com';
     readonly HEADERS = {
         'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Accept: 'application/json, */*; q=0.01',
-        Referer: 'https://player.videasy.net/',
-        Origin: 'https://player.videasy.net'
+        Referer: 'https://player.videasy.to/',
+        Origin: 'https://player.videasy.to'
     };
 
     readonly capabilities: ProviderCapabilities = {
@@ -55,6 +58,8 @@ export class VideasyProvider extends BaseProvider {
     private readonly servers: readonly VideasyServer[];
     private readonly fetchImpl: typeof fetch;
     private readonly decryptImpl: NonNullable<VideasyDependencies['decrypt']>;
+    private readonly seedCache = new Map<string, SeedEntry>();
+    private readonly seedRequests = new Map<string, Promise<SeedEntry>>();
 
     constructor(dependencies: VideasyDependencies = {}) {
         super();
@@ -125,9 +130,25 @@ export class VideasyProvider extends BaseProvider {
         server: VideasyServer,
         media: ProviderMediaObject
     ): Promise<ProviderResult | null> {
-        const params = this.buildParams(server, media);
-        const url = `${server.url}?${new URLSearchParams(params as Record<string, string>)}`;
-        const response = await this.fetchImpl(url, { headers: this.HEADERS });
+        const request = async () => {
+            const seed = await this.getSeed(String(media.tmdbId));
+            const params = {
+                ...this.buildParams(server, media),
+                enc: '2',
+                seed
+            };
+            const url = `${server.url}?${new URLSearchParams(params)}`;
+            const response = await this.fetchImpl(url, {
+                headers: this.HEADERS
+            });
+            return { response, seed };
+        };
+
+        let { response, seed } = await request();
+        if (response.status === 401) {
+            this.seedCache.delete(String(media.tmdbId));
+            ({ response, seed } = await request());
+        }
 
         if (!response.ok) {
             return null;
@@ -140,26 +161,28 @@ export class VideasyProvider extends BaseProvider {
             return null;
         }
 
-        const decrypted = await this.decryptImpl(blob, String(media.tmdbId));
+        const decrypted = this.decryptImpl(blob, seed, String(media.tmdbId));
 
         if (!decrypted || decrypted.sources.length === 0) {
             return null;
         }
 
         const sources: IdentifiedSource[] = decrypted.sources
-            .filter((s) => !!s?.url)
+            .filter(
+                (source) =>
+                    !!source?.url &&
+                    (!server.qualityFilter ||
+                        source.quality === server.qualityFilter) &&
+                    (!server.hlsOnly ||
+                        this.detectType(source.url, source.type) === 'hls')
+            )
             .map((s) =>
                 identityCatalog.identifySource(
                     {
                         url: this.createProxyUrl(s.url, this.HEADERS),
                         type: this.detectType(s.url, s.type),
                         quality: this.normalizeQuality(s.quality),
-                        audioTracks: [
-                            {
-                                language: this.resolveLanguage(server),
-                                label: this.resolveLanguageLabel(server)
-                            }
-                        ]
+                        audioTracks: [this.audioTrack(server, s.quality)]
                     },
                     {
                         familyId: VIDEASY_FAMILY_ID,
@@ -186,7 +209,7 @@ export class VideasyProvider extends BaseProvider {
         media: ProviderMediaObject
     ): Record<string, string> {
         const base: Record<string, string> = {
-            title: media.title ?? '', // no encodeURIComponent — URLSearchParams does it
+            title: encodeURIComponent(media.title ?? ''),
             mediaType: media.type === 'movie' ? 'movie' : 'tv',
             tmdbId: String(media.tmdbId),
             imdbId: media.imdbId ?? '',
@@ -198,8 +221,8 @@ export class VideasyProvider extends BaseProvider {
             base.year = String(media.releaseYear ?? '');
         }
 
-        if (server.language) {
-            base.language = server.language;
+        if (server.requestLanguage) {
+            base.language = server.requestLanguage;
         }
 
         return base;
@@ -226,24 +249,56 @@ export class VideasyProvider extends BaseProvider {
             : 'unknown';
     }
 
-    private resolveLanguage(server: VideasyServer): string {
-        if (!server.language) return 'en';
-        const map: Record<string, string> = {
-            german: 'de',
-            italian: 'it',
-            french: 'fr'
+    private audioTrack(server: VideasyServer, rawQuality?: string) {
+        const label = rawQuality?.trim().toLowerCase();
+        if (label === 'english') return { language: 'en', label: 'English' };
+        if (label === 'hindi') return { language: 'hi', label: 'Hindi' };
+        return {
+            language: server.language,
+            label: server.languageLabel
         };
-        return map[server.language] ?? 'en';
     }
 
-    private resolveLanguageLabel(server: VideasyServer): string {
-        if (!server.language) return 'English';
-        const map: Record<string, string> = {
-            german: 'German',
-            italian: 'Italian',
-            french: 'French'
-        };
-        return map[server.language] ?? 'English';
+    private async getSeed(mediaId: string): Promise<string> {
+        const now = Date.now();
+        const cached = this.seedCache.get(mediaId);
+        if (cached && cached.expiresAt - 5_000 > now) return cached.seed;
+
+        let pending = this.seedRequests.get(mediaId);
+        if (!pending) {
+            pending = (async () => {
+                const response = await this.fetchImpl(
+                    `${this.BASE_URL}/seed?${new URLSearchParams({ mediaId })}`,
+                    { headers: this.HEADERS }
+                );
+                if (!response.ok) {
+                    throw new Error('Videasy seed request failed');
+                }
+                const data = (await response.json()) as {
+                    seed?: unknown;
+                    ttlMs?: unknown;
+                };
+                if (typeof data.seed !== 'string' || data.seed.length === 0) {
+                    throw new TypeError('Videasy seed response was malformed');
+                }
+                const ttlMs =
+                    typeof data.ttlMs === 'number' &&
+                    Number.isFinite(data.ttlMs)
+                        ? Math.max(1_000, data.ttlMs)
+                        : 30_000;
+                return { seed: data.seed, expiresAt: Date.now() + ttlMs };
+            })();
+            this.seedRequests.set(mediaId, pending);
+        }
+        try {
+            const entry = await pending;
+            this.seedCache.set(mediaId, entry);
+            return entry.seed;
+        } finally {
+            if (this.seedRequests.get(mediaId) === pending) {
+                this.seedRequests.delete(mediaId);
+            }
+        }
     }
 
     private emptyResult(
