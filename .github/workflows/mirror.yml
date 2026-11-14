@@ -10,6 +10,8 @@ on:
 
 jobs:
   sync-repo-to-codeberg:
+    # Forks may use GitHub releases without configuring a Codeberg mirror.
+    if: ${{ vars.CODEBERG_BASE_URL != '' && vars.CODEBERG_USERNAME != '' }}
     runs-on: ubuntu-latest
 
     steps:

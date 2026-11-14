@@ -44,6 +44,19 @@
         "height": 480,
         "audioCodec": "aac"
       }
+    },
+    {
+      "component": "framework/proxy",
+      "behavior": "Run explicit byte transforms before CDN streaming patterns; tiktokcdn.com child segments must use buffered PNG/TS normalization.",
+      "evidence": {
+        "frameworkCommit": "c35890cbe4658fdaa948eadc6b9089a715d49216",
+        "focusedProxyTests": 34,
+        "normalizedSegmentBytes": 833780,
+        "videoCodec": "h264",
+        "width": 850,
+        "height": 480,
+        "audioCodec": "aac"
+      }
     }
   ],
   "discovery": {
