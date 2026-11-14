@@ -16,7 +16,7 @@
         "clean": "npx rimraf dist"
     },
     "dependencies": {
-        "@omss/framework": "git+https://github.com/Jules-Astier/framework.git#9a924805f8741506d964b461d55f93d81daad6c1",
+        "@omss/framework": "git+https://github.com/Jules-Astier/framework.git#6f3b60564b7bed8b9fed6bf71fa19d6ef9845bfe",
         "cheerio": "^1.2.0",
         "crypto-js": "^4.2.0",
         "dotenv": "^16.4.5",

@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-14",
+  "requestedAudio": "French-language original audio",
+  "provider": "papadustream",
+  "defaultEnabled": false,
+  "optIn": "PAPADUSTREAM_ENABLED=true",
+  "verifiedTargets": [
+    {
+      "title": "Lupin",
+      "tmdbId": "96677",
+      "sourceCount": 1,
+      "quality": "1080p",
+      "firstAudio": {
+        "language": "fr",
+        "label": "French [Original] stereo 4"
+      },
+      "preferredAudioLanguage": "fr",
+      "selectedFrenchOriginalStereo": true
+    },
+    {
+      "title": "Dix pour cent",
+      "tmdbId": "64165",
+      "sourceCount": 1,
+      "quality": "1080p",
+      "firstAudio": {
+        "language": "fr",
+        "label": "French [Original] stereo 4"
+      },
+      "preferredAudioLanguage": "fr",
+      "selectedFrenchOriginalStereo": true
+    }
+  ],
+  "mediaEvidence": {
+    "videoCodec": "h264",
+    "maxHeight": 1080,
+    "audioCodec": "aac",
+    "audioChannels": 2,
+    "audioLabel": "French [Original] stereo 4",
+    "audioEvidence": "Explicit manifest language=fr and [Original] label; the corresponding French rendition decoded through Saucy proxy.",
+    "defaultSelection": "New shared proxy marks French original stereo DEFAULT=YES/AUTOSELECT=YES and leaves alternate tracks available."
+  },
+  "negativeControl": {
+    "title": "Intouchables",
+    "tmdbId": "77338",
+    "observedLanguage": "und",
+    "inferredFrench": false
+  },
+  "otherCandidates": [
+    {
+      "id": "nakios",
+      "result": "Public source endpoint returned TLS/HTTP525."
+    },
+    {
+      "id": "movix",
+      "result": "Metadata accessible; tested playback candidates are embeds requiring separate host and ad audits."
+    }
+  ],
+  "pendingGates": [
+    "registered-provider API integration",
+    "browser playback certification"
+  ],
+  "references": [
+    "https://github.com/Gowaru/gowaru-nuvio-providers/tree/main/src/papadustream",
+    "https://www.papadustream.club/series/tt2531336",
+    "https://www.papadustream.club/series/tt4277922"
+  ],
+  "privacy": "No signed media paths, tokens, cookies or credentials are recorded."
+}
