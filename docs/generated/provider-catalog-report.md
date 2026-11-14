@@ -4,7 +4,7 @@
 
 Catalog schema version: 1<br>
 Entries: 209<br>
-Runtime providers discovered: 33
+Runtime providers discovered: 34
 
 ## Totals
 
@@ -18,12 +18,12 @@ Runtime providers discovered: 33
 | deterministic-pass | 1 |
 | disabled | 3 |
 | discovered | 66 |
-| live-pass | 2 |
+| live-pass | 3 |
 | rejected | 5 |
 | researching | 18 |
 | retired | 1 |
 | saucy-pass | 2 |
-| seed-needed | 89 |
+| seed-needed | 88 |
 
 ### Kind
 
@@ -80,10 +80,11 @@ Runtime providers discovered: 33
 | disabled-leaf | 9 |
 | drm | 5 |
 | embed-host-research | 8 |
+| french-original-audio | 1 |
 | handler-mismatch | 4 |
 | licensed-open-video | 5 |
 | live-sports | 4 |
-| regional-wave-1 | 16 |
+| regional-wave-1 | 15 |
 | regional-wave-2 | 38 |
 | retired | 1 |
 | torrent-research | 3 |
@@ -100,23 +101,23 @@ Runtime providers discovered: 33
 
 | Value | Count |
 | --- | ---: |
-| discoverable | 33 |
-| catalog-only | 176 |
+| discoverable | 34 |
+| catalog-only | 175 |
 
 ### Enabled default
 
 | Value | Count |
 | --- | ---: |
-| environment | 9 |
+| environment | 10 |
 | false | 10 |
 | true | 14 |
-| unknown | 176 |
+| unknown | 175 |
 
 ### Health check
 
 | Value | Count |
 | --- | ---: |
-| available | 28 |
+| available | 29 |
 | missing | 5 |
 
 ### Family / leaf totals
@@ -208,7 +209,7 @@ Runtime providers discovered: 33
 - `nites` — No attributable maintained primary adapter or manifest was found; authorized seed URLs needed
 - `onlykdrama` — Public manifest includes unsupported MKV; authorized movie and episode seeds are absent; authorized seed URLs needed
 - `openf1` — No health check
-- `papadustream` — High domain churn; no user-confirmed current origin; authorized seed URLs needed
+- `papadustream` — Opt-in PAPADUSTREAM_ENABLED=true; registered-provider and browser gates remain pending.; Public page-signed playlist URLs expire; one bounded refresh is allowed.; Unknown audio remains und; French subtitles or site origin are not French-original evidence.
 - `peachify` — Runtime output loses logical path leaf
 - `pelispanda` — No attributable maintained primary identity; authorized seed URLs needed
 - `pelisplushd` — Only stale public aggregator evidence; no confirmed current origin; authorized seed URLs needed
@@ -351,7 +352,6 @@ None.
 - `netflix` (rejected, drm)
 - `nites` (seed-needed, regional-wave-2)
 - `onlykdrama` (seed-needed, regional-wave-2)
-- `papadustream` (seed-needed, regional-wave-1)
 - `peertube` (deferred, licensed-open-video)
 - `pelispanda` (seed-needed, regional-wave-2)
 - `pelisplushd` (seed-needed, regional-wave-1)
@@ -473,7 +473,7 @@ None.
 | `nites` | provider | seed-needed | `nites` | — | movie, tv | hls, mp4 |
 | `onlykdrama` | provider | seed-needed | `onlykdrama` | — | movie, tv | hls, mp4 |
 | `openf1` | provider | deferred | `openf1` | `openf1` | live | metadata |
-| `papadustream` | provider | seed-needed | `papadustream` | — | movie, tv | hls, mp4 |
+| `papadustream` | provider | live-pass | `papadustream` | `papadustream` | movie, tv | hls |
 | `peachify` | aggregator | discovered | `peachify` | `Peachify` | movie, tv | hls, mp4 |
 | `peachify:air` | upstream | discovered | `peachify` | — | movie, tv | hls, mp4 |
 | `peachify:bmb` | upstream | discovered | `peachify` | — | movie, tv | hls, mp4 |
