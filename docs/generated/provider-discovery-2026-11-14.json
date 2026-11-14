@@ -1,0 +1,100 @@
+{
+  "date": "2026-11-14",
+  "target": {
+    "title": "Rivals",
+    "tmdbId": "208921",
+    "season": 1,
+    "episode": 1
+  },
+  "workingCandidate": {
+    "id": "framex:executioner",
+    "apiOrigin": "https://api.framextv.tech",
+    "newMediaHost": "frostlightvoyager.lol",
+    "tests": [
+      {
+        "tmdbId": "208921",
+        "type": "tv",
+        "season": 1,
+        "episode": 1,
+        "video": "h264",
+        "maxHeight": 1080,
+        "audio": "aac",
+        "throughSaucyProxy": true
+      },
+      {
+        "tmdbId": "603",
+        "type": "movie",
+        "video": "h264",
+        "width": 1920,
+        "height": 800,
+        "audio": "aac",
+        "throughSaucyProxy": true
+      }
+    ],
+    "defaultEnabled": false,
+    "enableEnvironment": "FRAMEX_ENABLED=true",
+    "pendingGates": [
+      "registered-provider API",
+      "browser playback"
+    ]
+  },
+  "otherFindings": [
+    {
+      "id": "soapertv",
+      "result": "Listed soaper.cc domain is parked / for sale."
+    },
+    {
+      "id": "mp4hydra",
+      "result": "mp4hydra.org redirects to a Back soon page."
+    },
+    {
+      "id": "nites",
+      "result": "Listed nites.is domain is parked."
+    },
+    {
+      "id": "lookmovie",
+      "result": "TLS connection failed to www.lookmovie2.to."
+    },
+    {
+      "id": "xprime",
+      "result": "Frontend TLS failure; backend untrusted certificate chain."
+    },
+    {
+      "id": "streamex",
+      "result": "Public search endpoint TLS failure."
+    },
+    {
+      "id": "goojara",
+      "result": "Homepage reachable; public search returned no response body for Rivals."
+    },
+    {
+      "id": "primesrc",
+      "result": "Ten advertised embed hosts, but link endpoint challenged."
+    },
+    {
+      "id": "netlio",
+      "result": "Rivals S1 catalog JSON returns 404."
+    },
+    {
+      "id": "hexa",
+      "result": "Episode API returns 403 no sources found."
+    },
+    {
+      "id": "vidfast",
+      "result": "Public episode page returns 403."
+    },
+    {
+      "id": "raflix",
+      "result": "Public API returns embeds, not verified direct sources."
+    },
+    {
+      "id": "framex:bowler",
+      "result": "Direct transports duplicate VidZee Slowcloud hosts; not implemented."
+    },
+    {
+      "id": "framex:root-rider",
+      "result": "Direct transport duplicates VidZee Slowcloud host; not implemented."
+    }
+  ],
+  "secrets": "Signed URLs, proxy keys, request tokens, cookies and credentials are excluded."
+}
