@@ -72,9 +72,18 @@ export class VidZeeProvider extends BaseProvider {
                 continue;
             }
             const decoded = result.value;
-            const headers = safeHeaders(decoded.headers);
+            const headers = {
+                ...this.HEADERS,
+                ...safeHeaders(decoded.headers)
+            };
             sources.push({
-                url: this.createProxyUrl(decoded.url, headers),
+                url: this.createProxyUrl(
+                    decoded.url,
+                    headers,
+                    new URL(decoded.url).hostname === 'cdn.slowcloud.live'
+                        ? { responseTransform: 'strip-png-ts-prefix' }
+                        : undefined
+                ),
                 type: decoded.url.toLowerCase().includes('.mp4')
                     ? 'mp4'
                     : 'hls',
@@ -190,18 +199,21 @@ export class VidZeeProvider extends BaseProvider {
 }
 
 function safeHeaders(value: Record<string, string> | undefined) {
-    const allowed = new Set([
-        'accept',
-        'accept-language',
-        'origin',
-        'referer',
-        'user-agent'
-    ]);
+    const allowed: Record<string, string> = {
+        accept: 'Accept',
+        'accept-language': 'Accept-Language',
+        origin: 'Origin',
+        referer: 'Referer',
+        'user-agent': 'User-Agent'
+    };
     return Object.fromEntries(
-        Object.entries(value ?? {}).filter(
-            ([name, entry]) =>
-                allowed.has(name.toLowerCase()) && typeof entry === 'string'
-        )
+        Object.entries(value ?? {})
+            .filter(
+                ([name, entry]) =>
+                    Object.hasOwn(allowed, name.toLowerCase()) &&
+                    typeof entry === 'string'
+            )
+            .map(([name, entry]) => [allowed[name.toLowerCase()], entry])
     );
 }
 

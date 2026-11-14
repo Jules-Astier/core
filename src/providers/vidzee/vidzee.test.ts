@@ -146,6 +146,58 @@ test('preserves safe decoded headers and rejects unapproved headers', async () =
     assert.equal(payload.headers.Cookie, undefined);
 });
 
+test('uses current playback headers when a decoded stream omits them', async () => {
+    const provider = new VidZeeProvider({
+        fetch: async () =>
+            Response.json({ url: 'https://media.invalid/master.m3u8' })
+    });
+    const result = await provider.getTVSources(episode);
+    const payload = JSON.parse(
+        new URL(result.sources[0].url).searchParams.get('data')!
+    );
+    assert.equal(payload.headers['User-Agent'], provider.HEADERS['User-Agent']);
+    assert.equal(payload.headers.Referer, `${provider.PLAYER_URL}/`);
+    assert.equal(payload.headers.Origin, provider.PLAYER_URL);
+});
+
+test('decoded headers override defaults regardless of header-name casing', async () => {
+    const provider = new VidZeeProvider({
+        fetch: async () =>
+            Response.json({
+                url: 'https://media.invalid/master.m3u8',
+                headers: {
+                    referer: 'https://upstream.invalid/',
+                    'user-agent': 'UpstreamPlayer/1'
+                }
+            })
+    });
+    const result = await provider.getTVSources(episode);
+    const payload = JSON.parse(
+        new URL(result.sources[0].url).searchParams.get('data')!
+    );
+    assert.equal(payload.headers.Referer, 'https://upstream.invalid/');
+    assert.equal(payload.headers['User-Agent'], 'UpstreamPlayer/1');
+    assert.equal(payload.headers.referer, undefined);
+});
+
+test('normalizes the PNG-wrapped Slowcloud transport without changing other CDNs', async () => {
+    for (const [host, expected] of [
+        ['cdn.slowcloud.live', 'strip-png-ts-prefix'],
+        ['cdn2.slowcloud.live', undefined],
+        ['media.invalid', undefined]
+    ]) {
+        const provider = new VidZeeProvider({
+            fetch: async () =>
+                Response.json({ url: `https://${host}/tv/master.m3u8` })
+        });
+        const result = await provider.getTVSources(episode);
+        const payload = JSON.parse(
+            new URL(result.sources[0].url).searchParams.get('data')!
+        );
+        assert.equal(payload.responseTransform, expected);
+    }
+});
+
 test('malformed encrypted responses fail closed with diagnostics', async () => {
     const provider = new VidZeeProvider({
         fetch: async (input) => {
