@@ -154,7 +154,10 @@ export class VidKingProvider extends BaseProvider {
             const diagnostics: Diagnostic[] = [];
             if (failures > 0) {
                 diagnostics.push({
-                    code: sources.length > 0 ? 'PARTIAL_SCRAPE' : 'PROVIDER_ERROR',
+                    code:
+                        sources.length > 0
+                            ? 'PARTIAL_SCRAPE'
+                            : 'PROVIDER_ERROR',
                     message: `${this.name}: ${failures} upstream resolver(s) were unavailable`,
                     field: '',
                     severity: sources.length > 0 ? 'warning' : 'error'
@@ -268,9 +271,7 @@ export class VidKingProvider extends BaseProvider {
                         url: this.createProxyUrl(input.url, this.HEADERS),
                         type,
                         quality: input.quality?.trim() || 'Auto',
-                        audioTracks: [
-                            { language: 'und', label: 'Original' }
-                        ]
+                        audioTracks: [{ language: 'und', label: 'Original' }]
                     },
                     {
                         familyId: VIDKING_FAMILY_ID,
@@ -341,7 +342,8 @@ function supportedSourceType(input: VidKingSource): SourceType | null {
 }
 
 function subtitleFormat(input: VidKingSubtitle): SubtitleFormat {
-    const value = `${input.type ?? ''} ${input.format ?? ''} ${input.url ?? ''}`.toLowerCase();
+    const value =
+        `${input.type ?? ''} ${input.format ?? ''} ${input.url ?? ''}`.toLowerCase();
     if (value.includes('.srt') || /\bsrt\b/.test(value)) return 'srt';
     if (value.includes('.ass') || /\bass\b/.test(value)) return 'ass';
     if (value.includes('.ssa') || /\bssa\b/.test(value)) return 'ssa';

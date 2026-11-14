@@ -1,8 +1,7 @@
 const HASH_WORDS = [
-    1116352408, 1899447441, 3049323471, 3921009573, 961987163,
-    1508970993, 2453635748, 2870763221, 3624381080, 310598401,
-    607225278, 1426881987, 1925078388, 2162078206, 2614888103,
-    3248222580
+    1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993,
+    2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987,
+    1925078388, 2162078206, 2614888103, 3248222580
 ] as const;
 const INITIAL_HASH_WORD = 1732584193;
 const STATE_SIZE = 61;
@@ -96,13 +95,10 @@ function nextWord(cipher: CipherState, wordIndex: number): number {
         (value ^ increment) >>> 0,
         initializedMask
     );
-    word = (
-        rotateLeft(
-            (word + cipher.accumulator) >>> 0,
-            position & 31
-        ) ^
-        rotateLeft(cipher.accumulator, Math.imul(position, 7) & 31)
-    ) >>> 0;
+    word =
+        (rotateLeft((word + cipher.accumulator) >>> 0, position & 31) ^
+            rotateLeft(cipher.accumulator, Math.imul(position, 7) & 31)) >>>
+        0;
     cipher.accumulator = mix32((word + GOLDEN_RATIO) >>> 0);
     cipher.state[position] = cipher.accumulator;
     return cipher.accumulator;
@@ -167,7 +163,7 @@ function rotateLeft(input: number, shift: number): number {
 }
 
 function chooseWord(left: number, right: number, mask: number): number {
-    return ((left ^ right) >>> 0 | ((left & right & mask) >>> 0)) >>> 0;
+    return (((left ^ right) >>> 0) | ((left & right & mask) >>> 0)) >>> 0;
 }
 
 function isEvenTriangular(value: number): boolean {

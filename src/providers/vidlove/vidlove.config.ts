@@ -45,15 +45,9 @@ export function createVidLoveLeafPolicy(
         VIDLOVE_FAMILY_ID,
         'allow'
     );
-    const globalDeny = globalLeafSwitch(
-        environment,
-        VIDLOVE_FAMILY_ID,
-        'deny'
-    );
+    const globalDeny = globalLeafSwitch(environment, VIDLOVE_FAMILY_ID, 'deny');
     const enabledLeaves = new Set<VidLoveLeaf>(
-        VIDLOVE_LEAVES.filter((leaf) =>
-            allowedByBoth(leaf, allow, globalAllow)
-        )
+        VIDLOVE_LEAVES.filter((leaf) => allowedByBoth(leaf, allow, globalAllow))
     );
     for (const leaf of deny) enabledLeaves.delete(leaf);
     for (const leaf of globalDeny ?? []) {
@@ -66,6 +60,5 @@ export function createVidLoveLeafPolicy(
 // implemented leaves stay opt-in until a known-working title is observed.
 export const VIDLOVE_LEAF_POLICY = createVidLoveLeafPolicy({
     ...process.env,
-    [VIDLOVE_ALLOW_ENV]:
-        process.env[VIDLOVE_ALLOW_ENV]?.trim() || 'ipcloud'
+    [VIDLOVE_ALLOW_ENV]: process.env[VIDLOVE_ALLOW_ENV]?.trim() || 'ipcloud'
 });

@@ -29,9 +29,7 @@ const identityEntries = [
 export const vidLoveIdentityCatalog =
     createProviderIdentityCatalog(identityEntries);
 
-export function vidLoveUpstreamId(
-    leaf: VidLoveLeaf
-): `vidlove:${VidLoveLeaf}` {
+export function vidLoveUpstreamId(leaf: VidLoveLeaf): `vidlove:${VidLoveLeaf}` {
     return vidLoveIdentityCatalog.resolve(
         leaf,
         VIDLOVE_FAMILY_ID

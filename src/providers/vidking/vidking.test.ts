@@ -61,10 +61,12 @@ function proxyPayload(url: string): {
     return JSON.parse(encoded);
 }
 
-function fixtureProvider(options: {
-    policy?: ReturnType<typeof createVidKingLeafPolicy>;
-    failedEndpoint?: string;
-} = {}) {
+function fixtureProvider(
+    options: {
+        policy?: ReturnType<typeof createVidKingLeafPolicy>;
+        failedEndpoint?: string;
+    } = {}
+) {
     const requests: URL[] = [];
     const fetchFixture: typeof fetch = async (input, init) => {
         const url = new URL(String(input));
@@ -76,7 +78,10 @@ function fixtureProvider(options: {
         if (url.pathname === '/seed') {
             return Response.json({ seed: FIXTURE_SEED, ttlMs: 30_000 });
         }
-        if (options.failedEndpoint && url.pathname.includes(options.failedEndpoint)) {
+        if (
+            options.failedEndpoint &&
+            url.pathname.includes(options.failedEndpoint)
+        ) {
             return new Response('unavailable', { status: 503 });
         }
         return new Response(url.pathname);
@@ -123,11 +128,7 @@ function fixtureProvider(options: {
 }
 
 test('decrypts a sanitized version-2 payload fixture', () => {
-    const plaintext = decryptVidKingPayload(
-        FIXTURE_PAYLOAD,
-        FIXTURE_SEED,
-        603
-    );
+    const plaintext = decryptVidKingPayload(FIXTURE_PAYLOAD, FIXTURE_SEED, 603);
     assert.deepEqual(JSON.parse(plaintext), {
         sources: [
             {
@@ -173,18 +174,24 @@ test('maps all active upstreams to stable leaf identities', async () => {
     assert.equal(requests[0].pathname, '/seed');
     assert.equal(requests.length, VIDKING_LEAVES.length + 1);
     assert.ok(
-        requests.slice(1).every(
-            (url) =>
-                url.searchParams.get('tmdbId') === '603' &&
-                url.searchParams.get('mediaType') === 'movie' &&
-                url.searchParams.get('title') === 'The Matrix' &&
-                url.searchParams.get('year') === '1999' &&
-                url.searchParams.get('imdbId') === 'tt0133093' &&
-                url.searchParams.get('enc') === '2' &&
-                url.searchParams.get('_t') === String(NOW)
-        )
+        requests
+            .slice(1)
+            .every(
+                (url) =>
+                    url.searchParams.get('tmdbId') === '603' &&
+                    url.searchParams.get('mediaType') === 'movie' &&
+                    url.searchParams.get('title') === 'The Matrix' &&
+                    url.searchParams.get('year') === '1999' &&
+                    url.searchParams.get('imdbId') === 'tt0133093' &&
+                    url.searchParams.get('enc') === '2' &&
+                    url.searchParams.get('_t') === String(NOW)
+            )
     );
-    assert.equal(result.subtitles.length, 1, 'shared subtitles are deduplicated');
+    assert.equal(
+        result.subtitles.length,
+        1,
+        'shared subtitles are deduplicated'
+    );
 
     const source = proxyPayload(result.sources[0].url);
     assert.equal(source.headers.Referer, `${FRONTEND_URL}/`);
@@ -259,7 +266,9 @@ test('allow and deny switches select exact VidKing leaves', async () => {
     const { provider } = fixtureProvider({ policy });
     const result = await provider.getMovieSources(movie);
     assert.deepEqual(
-        (result.sources as IdentifiedSource[]).map(({ upstreamId }) => upstreamId),
+        (result.sources as IdentifiedSource[]).map(
+            ({ upstreamId }) => upstreamId
+        ),
         ['vidking:yoru', 'vidking:neon']
     );
 });
