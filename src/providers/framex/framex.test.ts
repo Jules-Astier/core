@@ -1,8 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ProviderMediaObject } from '@omss/framework';
+import type {
+    ProviderMediaObject,
+    ProviderResult,
+    SourceType
+} from '@omss/framework';
+import type { IdentifiedSource } from '../../provider-identity.js';
 import { FramexProvider, playbackTarget } from './framex.js';
-import { assertProviderResultContract } from '../../../test/support/provider-contract.js';
+const contractModulePath = '../../../test/support/provider-contract.js';
+const { assertProviderResultContract } = (await import(contractModulePath)) as {
+    assertProviderResultContract: (
+        result: ProviderResult,
+        options: {
+            providerId: string;
+            allowedTypes?: readonly SourceType[];
+            minimumSources?: number;
+        }
+    ) => void;
+};
 
 const movie = {
     type: 'movie',
@@ -104,8 +119,14 @@ for (const media of [movie, episode])
         assert.equal(payload.headers.Origin, 'https://vidrock.to');
         assert.equal(payload.headers.Referer, 'https://vidrock.to/');
         assert.equal(result.sources[0].provider.id, 'framex:executioner');
-        assert.equal(result.sources[0].providerFamilyId, 'framex');
-        assert.equal(result.sources[0].upstreamId, 'framex:executioner');
+        assert.equal(
+            (result.sources[0] as IdentifiedSource).providerFamilyId,
+            'framex'
+        );
+        assert.equal(
+            (result.sources[0] as IdentifiedSource).upstreamId,
+            'framex:executioner'
+        );
     });
 
 test('is opt-in and obeys global leaf switches', async () => {

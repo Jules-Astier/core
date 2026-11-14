@@ -2,12 +2,19 @@ import { BaseProvider } from '@omss/framework';
 import type {
     ProviderCapabilities,
     ProviderMediaObject,
-    ProviderResult,
-    Source
+    ProviderResult
 } from '@omss/framework';
+import {
+    createProviderIdentityCatalog,
+    type IdentifiedSource
+} from '../../provider-identity.js';
 import { globalLeafSwitch } from '../provider-leaf-switches.js';
 
 const LEAF = 'executioner';
+const identityCatalog = createProviderIdentityCatalog([
+    { id: 'framex', kind: 'aggregator' },
+    { id: 'framex:executioner', familyId: 'framex', kind: 'upstream' }
+]);
 const DUPLICATE_CDNS = new Set([
     'cdn.slowcloud.live',
     'cdn1.slowcloud.live',
@@ -97,7 +104,7 @@ export class FramexProvider extends BaseProvider {
             };
             if (data.success !== true || !Array.isArray(data.sources))
                 return this.empty('no sources returned');
-            const sources: Source[] = [];
+            const sources: IdentifiedSource[] = [];
             const seen = new Set<string>();
             let checked = 0;
             for (const candidate of data.sources.slice(0, 8)) {
@@ -126,18 +133,24 @@ export class FramexProvider extends BaseProvider {
                     !/^\uFEFF?\s*#EXTM3U(?:\r?\n|$)/.test(await manifest.text())
                 )
                     continue;
-                sources.push({
-                    url: this.createProxyUrl(target.url, target.headers),
-                    type: 'hls',
-                    quality: candidate.quality || 'Auto',
-                    audioTracks: [{ language: 'und', label: 'Auto' }],
-                    provider: {
-                        id: 'framex:executioner',
-                        name: 'FrameX / Executioner'
-                    },
-                    providerFamilyId: 'framex',
-                    upstreamId: 'framex:executioner'
-                });
+                sources.push(
+                    identityCatalog.identifySource(
+                        {
+                            url: this.createProxyUrl(
+                                target.url,
+                                target.headers
+                            ),
+                            type: 'hls',
+                            quality: candidate.quality || 'Auto',
+                            audioTracks: [{ language: 'und', label: 'Auto' }]
+                        },
+                        {
+                            familyId: this.id,
+                            upstreamId: LEAF,
+                            providerName: 'FrameX / Executioner'
+                        }
+                    )
+                );
                 break;
             }
             return sources.length
