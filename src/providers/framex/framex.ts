@@ -138,7 +138,13 @@ export class FramexProvider extends BaseProvider {
                         {
                             url: this.createProxyUrl(
                                 target.url,
-                                target.headers
+                                target.headers,
+                                new URL(target.url).hostname === 'vercetti.org'
+                                    ? {
+                                          responseTransform:
+                                              'strip-png-ts-prefix'
+                                      }
+                                    : undefined
                             ),
                             type: 'hls',
                             quality: candidate.quality || 'Auto',
