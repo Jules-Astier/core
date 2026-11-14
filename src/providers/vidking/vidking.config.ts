@@ -45,15 +45,9 @@ export function createVidKingLeafPolicy(
         VIDKING_FAMILY_ID,
         'allow'
     );
-    const globalDeny = globalLeafSwitch(
-        environment,
-        VIDKING_FAMILY_ID,
-        'deny'
-    );
+    const globalDeny = globalLeafSwitch(environment, VIDKING_FAMILY_ID, 'deny');
     const enabledLeaves = new Set<VidKingLeaf>(
-        VIDKING_LEAVES.filter((leaf) =>
-            allowedByBoth(leaf, allow, globalAllow)
-        )
+        VIDKING_LEAVES.filter((leaf) => allowedByBoth(leaf, allow, globalAllow))
     );
     for (const leaf of deny) enabledLeaves.delete(leaf);
     for (const leaf of globalDeny ?? []) {

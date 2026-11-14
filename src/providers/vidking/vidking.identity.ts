@@ -28,9 +28,7 @@ const identityEntries = [
 export const vidKingIdentityCatalog =
     createProviderIdentityCatalog(identityEntries);
 
-export function vidKingUpstreamId(
-    leaf: VidKingLeaf
-): `vidking:${VidKingLeaf}` {
+export function vidKingUpstreamId(leaf: VidKingLeaf): `vidking:${VidKingLeaf}` {
     return vidKingIdentityCatalog.resolve(
         leaf,
         VIDKING_FAMILY_ID

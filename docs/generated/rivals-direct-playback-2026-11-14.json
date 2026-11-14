@@ -1,0 +1,69 @@
+{
+  "checkedAt": "2026-11-14",
+  "target": {
+    "tmdbId": "208921",
+    "title": "Rivals",
+    "season": 1,
+    "episode": 1
+  },
+  "baseline": {
+    "apiSources": 2,
+    "providers": [
+      "vidzee",
+      "vixsrc"
+    ],
+    "vidzeePlaylistStatus": 403,
+    "vixsrcUpstreamSegmentBytes": 60544,
+    "vixsrcCorruptedProxySegmentBytes": 443366
+  },
+  "fixes": [
+    {
+      "component": "framework/proxy",
+      "behavior": "Identify HLS by #EXTM3U signature before decoding; preserve binary chunks byte-for-byte.",
+      "evidence": {
+        "upstreamBytes": 60544,
+        "fixedProxyBytes": 60544,
+        "identical": true
+      }
+    },
+    {
+      "component": "core/vidzee",
+      "behavior": "Use current provider playback headers by default; preserve safe case-insensitive upstream overrides."
+    },
+    {
+      "component": "core/vidzee",
+      "behavior": "Normalize the confirmed 70-byte PNG wrapper on cdn.slowcloud.live using the existing strict transform.",
+      "evidence": {
+        "segmentBytes": 833850,
+        "tsSyncOffsets": [
+          70,
+          258
+        ],
+        "videoCodec": "h264",
+        "width": 850,
+        "height": 480,
+        "audioCodec": "aac"
+      }
+    }
+  ],
+  "discovery": {
+    "origin": "https://321movies.xyz",
+    "advertisedCandidates": 10,
+    "sourcepackFamilies": [
+      "bcine",
+      "cinesrc",
+      "rivestream",
+      "pstream"
+    ],
+    "publicProxyResults": "403",
+    "underlyingReachableTransports": [
+      "cdn.slowcloud.live",
+      "cdn2.slowcloud.live"
+    ],
+    "newIndependentVerifiedProviders": 0
+  },
+  "limitations": [
+    "Segment and codec checks do not certify full episode playback or seeking.",
+    "No signed media URLs, proxy keys, cookies, or personal credentials are recorded."
+  ]
+}
