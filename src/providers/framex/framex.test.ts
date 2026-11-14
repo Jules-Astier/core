@@ -129,6 +129,28 @@ for (const media of [movie, episode])
         );
     });
 
+test('requests strict normalization only for the verified Vercetti transport', async () => {
+    const f = fixture({
+        sources: [
+            {
+                type: 'hls',
+                url: wrapper('https://vercetti.org/movie/master.m3u8')
+            }
+        ]
+    });
+    const result = await f.provider.getMovieSources(movie);
+    const payload = JSON.parse(
+        new URL(result.sources[0].url).searchParams.get('data')!
+    );
+    assert.equal(payload.responseTransform, 'strip-png-ts-prefix');
+    const ordinary = await fixture().provider.getTVSources(episode);
+    assert.equal(
+        JSON.parse(new URL(ordinary.sources[0].url).searchParams.get('data')!)
+            .responseTransform,
+        undefined
+    );
+});
+
 test('is opt-in and obeys global leaf switches', async () => {
     assert.equal(fixture({ environment: {} }).provider.enabled, false);
     for (const environment of [

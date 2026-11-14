@@ -36,7 +36,17 @@
     "pendingGates": [
       "registered-provider API",
       "browser playback"
-    ]
+    ],
+    "transportNormalization": {
+      "host": "vercetti.org",
+      "responseTransform": "strip-png-ts-prefix",
+      "verifiedPrefixBytes": 64,
+      "videoCodec": "h264",
+      "width": 1920,
+      "height": 800,
+      "audioCodec": "aac",
+      "frameworkCommit": "9a924805f8741506d964b461d55f93d81daad6c1"
+    }
   },
   "otherFindings": [
     {
