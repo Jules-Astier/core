@@ -1,0 +1,55 @@
+# HiAnime and WCO TV-animation adapters
+
+Both adapters are opt-in: `HIANIME_ENABLED=true` and `WCO_ENABLED=true`.
+They require the existing `TMDB_API_KEY`. They use the standard provider proxy,
+strict framework validation and existing source-language ranking; no client
+binary change is required. They do not return webpage embeds as playable media.
+
+## Identity and episode mapping
+
+Only TMDB TV records with animation genre 16 are eligible. Specials, invalid
+numbers and missing/duplicate preceding-season counts are refused. HiAnime
+requires a unique exact normalized title match and selects the exact absolute
+episode from its own episode listing. WCO requires an exact series-page title
+match and selects an exact season/episode URL when present, otherwise the exact
+absolute episode. A title alias, different series slug or a separately named
+anime season may need an explicit mapping in a future update; no fuzzy match
+or silent episode-one fallback is used. Movie/OVA support is not claimed.
+
+## HiAnime
+
+Observed public chain on 2026-11-17: site search -> episode list -> server list
+-> ZokoAnime public player payload -> valid HLS playlist. The adapter parses
+the site's fixed XOR/base64 player data without executing upstream scripts.
+Only known player hosts and `dramahot.top` media/subtitle hosts are accepted;
+unknown hosts fail closed. Subbed audio follows TMDB's original language;
+English-dub variants are separate source entries. External VTT subtitles are
+proxied with the player headers. Signed media URLs must be rediscovered when
+expired; they are never committed to fixtures or printed in diagnostics.
+
+## WCO
+
+The initial plain User-Agent probe returned 403. An ordinary desktop browser
+User-Agent plus Accept/Accept-Language fetched real series and episode HTML;
+this was not evidence of a universal datacenter block. Public episode pages
+encode their iframe as a base64 numeric character array. This is decoded as
+data, without eval, ad scripts, CAPTCHA solving or user cookies. The public
+player's video-js page exposes getvidlink.php, which returns signed MP4 tokens.
+Verification follows only wcostream.com redirects and checks a bounded ranged
+response for an MP4 ftyp signature; HTML/error.mp4 is not accepted as evidence.
+
+One Piece episode 1180 English Subbed returned a valid public 206 MP4 response
+on Paul. Episode 1 English Dubbed explicitly displayed a premium-only notice.
+Premium episodes are excluded with an account-required diagnostic. This adapter
+has no premium-account integration and never attempts alternate hidden endpoints
+for a premium page. Hard-subbed video is not advertised as switchable subtitles.
+
+## Release checks
+
+Focused tests cover exact identity/numbering, public serialization, premium
+refusal, hostile media/redirect hosts and HTML masquerading as media. Full build,
+provider-catalog validation/report consistency and bounded live probes run in a
+Croissant Paul job. Live verification must distinguish discovery, verification,
+manifest/ranged-MP4 access and actual player acceptance. Paul success alone is
+not proof of VPS or device playback. Keep both flags disabled by default until
+registered-provider and Saucy/player canaries pass.
