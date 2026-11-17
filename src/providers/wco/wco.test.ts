@@ -137,5 +137,9 @@ test('series identity mismatch does not fetch any episode', async () => {
 test('WCO is opt-in and does not claim movie support', async () => {
     const p = new WcoProvider({ environment: {} });
     assert.equal(p.enabled, false);
-    assert.deepEqual(await p.getMovieSources(), { sources: [], subtitles: [] });
+    assert.deepEqual(await p.getMovieSources(), {
+        sources: [],
+        subtitles: [],
+        diagnostics: []
+    });
 });
