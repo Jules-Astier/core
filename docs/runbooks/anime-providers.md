@@ -79,3 +79,14 @@ All four providers remain opt-in in source. The deployment canary enables them
 explicitly after fixture, public-media, and registered-proxy checks. Generic
 Fight Club/Game of Thrones resolver rechecks are not acceptance tests for these
 animation-specific providers; the live canary uses animation identities.
+
+## Executed validation
+
+Croissant evt_fbf04e9e78efdc00eb616c751e at e8e00ef6123cc0eb5cdf74e6025fa33d56390c77
+passed the TypeScript build, catalog/report checks,231 provider/health tests and
+15 catalog tests. Live public canaries returned HiAnime One Piece1/1180 and
+Naruto Shippuden1, WCO One Piece1180 and Naruto Shippuden1, AnimeAV1 One Piece1,
+and SuperCartoons The Cat Concerto (TMDB39853). WCO One Piece1 was correctly
+reported premium-only. Missing AnimeAV1 episodes returned no fabricated source.
+No account credentials or signed stream URLs are retained in these receipts.
+Registered runtime/proxy and deployment validation follow separately.

@@ -18,8 +18,7 @@ Runtime providers discovered: 38
 | deterministic-pass | 1 |
 | disabled | 3 |
 | discovered | 66 |
-| implementing | 4 |
-| live-pass | 3 |
+| live-pass | 7 |
 | rejected | 5 |
 | researching | 18 |
 | retired | 1 |
@@ -403,7 +402,7 @@ None.
 | `altadefinizionestreaming` | provider | seed-needed | `altadefinizionestreaming` | — | movie, tv | hls, mp4 |
 | `anikototv` | provider | seed-needed | `anikototv` | — | movie, tv | hls, mp4 |
 | `anime-sama` | provider | seed-needed | `anime-sama` | — | movie, tv | hls, mp4 |
-| `animeav1` | provider | implementing | `animeav1` | `animeav1` | tv | hls |
+| `animeav1` | provider | live-pass | `animeav1` | `animeav1` | tv | hls |
 | `animekai` | provider | seed-needed | `animekai` | — | movie, tv | hls, mp4 |
 | `animepahe` | provider | seed-needed | `animepahe` | — | movie, tv | hls, mp4 |
 | `animesaturn` | provider | seed-needed | `animesaturn` | — | movie, tv | hls, mp4 |
@@ -452,7 +451,7 @@ None.
 | `hdfilmcehennemi` | provider | seed-needed | `hdfilmcehennemi` | — | movie, tv | hls, mp4 |
 | `hdfilme` | provider | seed-needed | `hdfilme` | — | movie, tv | hls, mp4 |
 | `hdhub4u` | provider | deferred | `hdhub4u` | — | movie, tv | direct-download |
-| `hianime` | provider | implementing | `hianime` | `hianime` | tv | hls |
+| `hianime` | provider | live-pass | `hianime` | `hianime` | tv | hls |
 | `icefy` | provider | discovered | `icefy` | `Icefy` | movie, tv | hls, mp4 |
 | `internet-archive` | provider | deferred | `internet-archive` | — | movie, tv | hls, mp4 |
 | `kisskh` | provider | deferred | `kisskh` | — | movie, tv | hls, mp4 |
@@ -514,7 +513,7 @@ None.
 | `streamtape` | embed_host | seed-needed | `streamtape` | — | movie, tv | embed |
 | `streamwish` | embed_host | seed-needed | `streamwish` | — | movie, tv | embed |
 | `streamzo` | provider | seed-needed | `streamzo` | — | movie, tv | hls, mp4 |
-| `supercartoons` | provider | implementing | `supercartoons` | `supercartoons` | movie, tv | mp4 |
+| `supercartoons` | provider | live-pass | `supercartoons` | `supercartoons` | movie, tv | mp4 |
 | `superembed` | provider | discovered | `superembed` | `superembed` | movie, tv | embed, hls |
 | `tioplus` | provider | seed-needed | `tioplus` | — | movie, tv | hls, mp4 |
 | `torrastream` | torrent_resolver | discovered | `torrastream` | — | movie, tv | torrent |
@@ -598,7 +597,7 @@ None.
 | `vixsrc` | provider | deterministic-pass | `vixsrc` | `vixsrc` | movie, tv | hls |
 | `voe` | embed_host | seed-needed | `voe` | — | movie, tv | embed |
 | `voiranime` | provider | seed-needed | `voiranime` | — | movie, tv | hls, mp4 |
-| `wco` | provider | implementing | `wco` | `wco` | tv | mp4 |
+| `wco` | provider | live-pass | `wco` | `wco` | tv | mp4 |
 | `wikimedia-commons` | provider | deferred | `wikimedia-commons` | — | movie, tv | hls, mp4 |
 | `wookafr` | provider | seed-needed | `wookafr` | — | movie, tv | hls, mp4 |
 | `xprime` | provider | seed-needed | `xprime` | — | movie, tv | hls, mp4 |
