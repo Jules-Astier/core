@@ -90,3 +90,18 @@ and SuperCartoons The Cat Concerto (TMDB39853). WCO One Piece1 was correctly
 reported premium-only. Missing AnimeAV1 episodes returned no fabricated source.
 No account credentials or signed stream URLs are retained in these receipts.
 Registered runtime/proxy and deployment validation follow separately.
+
+## Pinned framework Range compatibility
+
+Registered container canaries exposed a framework issue: the proxy controller
+adds lowercase `range`, then the streaming service adds uppercase `Range`.
+Fetch joins those into one comma-separated value; SuperCartoons rejects it416.
+The build applies `scripts/patch-framework-ranges.mjs` to the pinned compiled
+proxy only. It normalizes a single caller Range while preserving every other
+header and the existing timeout/body/status handling. Two observed pinned
+artifact hashes are accepted (host and container); the exact broken block must
+occur once. The operation is idempotent and rejects every other upstream byte
+sequence, including unrelated drift. No framework version is upgraded.
+A real localhost HTTP regression exercises the actual patched service and
+requires one correct206 range response. WCO's extensionless `/getvid` endpoint
+is explicitly classified as streaming, preventing whole-file MP4 buffering.

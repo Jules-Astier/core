@@ -42,7 +42,8 @@ ENV CACHE_TYPE=${CACHE_TYPE}
 ENV DADDYLIVE_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 COPY package*.json ./
-RUN npm ci --only=production
+COPY scripts/patch-framework-ranges.mjs ./scripts/patch-framework-ranges.mjs
+RUN npm ci --only=production && node scripts/patch-framework-ranges.mjs
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/config ./config

@@ -2,6 +2,7 @@
 // by default the most common video files are included in the @omss/framework
 
 export const streamPatterns: RegExp[] = [
+    /^https:\/\/(?:[a-z0-9-]+\.)?wcostream\.com\/getvid(?:\?|$)/,
     /pixeldrain\.dev|pixeldra\.in/,
     /hub\.(raj\.lat|toxix\.buzz|oreao-cdn\.buzz)/,
     /wasabisys\.com/,
