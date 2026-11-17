@@ -31,11 +31,7 @@ async function main() {
             ttl: {
                 sources: 60 * 60,
                 subtitles: 60 * 60 * 24,
-                liveManifest: Number(
-                    process.env.LIVE_MANIFEST_CACHE_TTL ??
-                        process.env.APISPORTS_CACHE_TTL_SECONDS ??
-                        6 * 60 * 60
-                ),
+                liveManifest: Number(process.env.LIVE_MANIFEST_CACHE_TTL ?? 60),
                 liveSources: Number(process.env.LIVE_SOURCE_CACHE_TTL ?? 30)
             },
             redis: {

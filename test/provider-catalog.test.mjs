@@ -115,8 +115,8 @@ test('accepted lifecycle and enablement evidence gates are enforced', async () =
 
 test('filesystem discovery has exact one-to-one catalog coverage', async () => {
   const runtime = await discoverRuntimeProviders();
-  assert.equal(runtime.length, 38);
-  assert.equal(new Set(runtime.map((e) => e.runtimeId)).size, 38);
+  assert.equal(runtime.length, 39);
+  assert.equal(new Set(runtime.map((e) => e.runtimeId)).size, 39);
   assert.deepEqual(
     runtime.map((e) => e.runtimeId).sort(),
     catalog.entries.filter((e) => e.runtime.discoverable).map((e) => e.runtime.runtimeId).sort()
