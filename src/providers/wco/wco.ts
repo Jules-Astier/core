@@ -92,7 +92,7 @@ export class WcoProvider extends BaseProvider {
         this.fetchImpl = deps.fetch ?? fetch;
     }
     async getMovieSources(): Promise<ProviderResult> {
-        return { sources: [], subtitles: [] };
+        return { sources: [], subtitles: [], diagnostics: [] };
     }
     async getTVSources(media: ProviderMediaObject): Promise<ProviderResult> {
         const empty = (reason: string): ProviderResult => ({
@@ -121,7 +121,7 @@ export class WcoProvider extends BaseProvider {
                 )
             );
             if (!details.genres?.some((g: { id: number }) => g.id === 16))
-                return { sources: [], subtitles: [] };
+                return { sources: [], subtitles: [], diagnostics: [] };
             const absolute = absoluteEpisode(details, media.s!, media.e!);
             if (!absolute)
                 return empty('unsupported or incomplete episode numbering');
@@ -244,7 +244,7 @@ export class WcoProvider extends BaseProvider {
                 r.status === 'fulfilled' ? r.value : []
             );
             return sources.length
-                ? { sources, subtitles: [] }
+                ? { sources, subtitles: [], diagnostics: [] }
                 : empty(
                       premium
                           ? 'episode requires a WCO premium account; public adapter cannot access it'

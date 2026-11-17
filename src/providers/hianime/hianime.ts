@@ -103,7 +103,7 @@ export class HiAnimeProvider extends BaseProvider {
         this.fetchImpl = deps.fetch ?? fetch;
     }
     async getMovieSources(): Promise<ProviderResult> {
-        return { sources: [], subtitles: [] };
+        return { sources: [], subtitles: [], diagnostics: [] };
     }
     async getTVSources(media: ProviderMediaObject): Promise<ProviderResult> {
         const empty = (message: string): ProviderResult => ({
@@ -132,7 +132,7 @@ export class HiAnimeProvider extends BaseProvider {
                 )
             ) as Series;
             if (!series.genres?.some((g) => g.id === 16))
-                return { sources: [], subtitles: [] };
+                return { sources: [], subtitles: [], diagnostics: [] };
             const episode = absoluteEpisode(series, media.s!, media.e!);
             if (!episode)
                 return empty('unsupported or incomplete episode numbering');
@@ -298,7 +298,7 @@ export class HiAnimeProvider extends BaseProvider {
                 return empty(
                     'no supported verified player; blocked, unavailable or changed upstream'
                 );
-            return { sources, subtitles };
+            return { sources, subtitles, diagnostics: [] };
         } catch {
             // Never include signed URLs, TMDB keys, player blobs or upstream error bodies.
             return empty(
