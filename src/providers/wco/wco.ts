@@ -282,9 +282,22 @@ export class WcoProvider extends BaseProvider {
                             continue;
                         const target = new URL('/getvid', server);
                         target.searchParams.set('evid', data[key]);
-                        if (!(await this.verify(target, signal))) continue;
+                        target.searchParams.set('json', '');
+                        const location = JSON.parse(
+                            await this.read(target, MEDIA_HOSTS, signal)
+                        );
+                        if (
+                            typeof location !== 'string' ||
+                            location.length > 4096
+                        )
+                            continue;
+                        const verified = await this.verify(
+                            new URL(location),
+                            signal
+                        );
+                        if (!verified) continue;
                         sources.push({
-                            url: this.createProxyUrl(target.href, {
+                            url: this.createProxyUrl(verified, {
                                 ...HEADERS,
                                 Referer: 'https://embed.wcostream.com/'
                             }),
@@ -342,7 +355,9 @@ export class WcoProvider extends BaseProvider {
                           Referer: 'https://embed.wcostream.com/',
                           'X-Requested-With': 'XMLHttpRequest'
                       }
-                    : HEADERS,
+                    : u.hostname.endsWith('.wcostream.com')
+                      ? { ...HEADERS, Referer: 'https://embed.wcostream.com/' }
+                      : HEADERS,
             signal,
             redirect: 'manual'
         });
@@ -367,10 +382,10 @@ export class WcoProvider extends BaseProvider {
         }
         return Buffer.concat(chunks).toString('utf8');
     }
-    private async verify(u: URL, signal: AbortSignal): Promise<boolean> {
+    private async verify(u: URL, signal: AbortSignal): Promise<string | null> {
         for (let i = 0; i < 4; i++) {
             if (!valid(u, MEDIA_HOSTS) || /\/error\.mp4$/i.test(u.pathname))
-                return false;
+                return null;
             const r = await this.fetchImpl(u.href, {
                 headers: {
                     ...HEADERS,
@@ -383,13 +398,13 @@ export class WcoProvider extends BaseProvider {
             if (r.status >= 300 && r.status < 400) {
                 await r.body?.cancel();
                 const location = r.headers.get('location');
-                if (!location) return false;
+                if (!location) return null;
                 u = new URL(location, u);
                 continue;
             }
             if (!r.ok || !r.body) {
                 await r.body?.cancel();
-                return false;
+                return null;
             }
             const reader = r.body.getReader();
             let b = Buffer.alloc(0);
@@ -402,8 +417,10 @@ export class WcoProvider extends BaseProvider {
             } finally {
                 await reader.cancel().catch(() => {});
             }
-            return b.length >= 12 && b.toString('ascii', 4, 8) === 'ftyp';
+            return b.length >= 12 && b.toString('ascii', 4, 8) === 'ftyp'
+                ? u.href
+                : null;
         }
-        return false;
+        return null;
     }
 }

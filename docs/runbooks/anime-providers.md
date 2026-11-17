@@ -105,3 +105,9 @@ sequence, including unrelated drift. No framework version is upgraded.
 A real localhost HTTP regression exercises the actual patched service and
 requires one correct206 range response. WCO's extensionless `/getvid` endpoint
 is explicitly classified as streaming, preventing whole-file MP4 buffering.
+
+WCO follows the public player's `getvid?...&json` lookup and stores the final
+verified CDN destination, not its rotating redirector. Otherwise verification
+and playback can be sent to different edges. Signed final URLs still expire;
+normal source rediscovery is required after expiry. No retries or access checks
+are removed by this change.

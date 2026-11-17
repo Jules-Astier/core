@@ -82,6 +82,11 @@ function fixture(
                     fhd: 'synthetic-token'
                 });
             }
+            if (
+                u.hostname === 'neptun.wcostream.com' &&
+                u.searchParams.has('json')
+            )
+                return Response.json('https://neptun.wcostream.com/public.mp4');
             if (u.hostname === 'neptun.wcostream.com')
                 return new Response(null, {
                     status: 302,
@@ -117,6 +122,7 @@ test('exact public episode resolves verified ranged MP4 with required headers', 
         new URL(r.sources[0].url).searchParams.get('data')!
     );
     assert.equal(proxy.headers.Referer, 'https://embed.wcostream.com/');
+    assert.equal(proxy.url, 'https://e15.wcostream.com/synthetic.mp4');
 });
 test('premium-only episodes are not fetched through hidden or alternate players', async () => {
     const { provider, calls } = fixture({ premium: true });
