@@ -20,7 +20,8 @@ const HEADERS = {
 };
 const normal = (s: string) =>
     s
-        .normalize('NFKC')
+        .normalize('NFKD')
+        .replace(/\p{M}/gu, '')
         .toLowerCase()
         .replace(/[^\p{L}\p{N}]/gu, '');
 const valid = (u: URL, hosts: string[]) =>

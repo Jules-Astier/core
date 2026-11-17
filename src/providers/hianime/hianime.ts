@@ -21,7 +21,8 @@ type Series = {
 type Dependencies = { fetch?: typeof fetch; environment?: NodeJS.ProcessEnv };
 const normalize = (s: string) =>
     s
-        .normalize('NFKC')
+        .normalize('NFKD')
+        .replace(/\p{M}/gu, '')
         .toLowerCase()
         .replace(/[^\p{L}\p{N}]/gu, '');
 function allowed(url: URL, domains: string[]) {

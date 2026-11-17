@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { WcoProvider, publicIframe } from './wco.js';
+import { WcoProvider, publicIframe, readPublicWcoPage } from './wco.js';
 const media = {
     type: 'tv' as const,
     tmdbId: '37854',
@@ -139,4 +139,15 @@ test('WCO is opt-in and does not claim movie support', async () => {
         subtitles: [],
         diagnostics: []
     });
+});
+test('public-page transport rejects non-WCO and private origins before spawning', async () => {
+    for (const u of [
+        'https://127.0.0.1/',
+        'http://www.wco.tv/',
+        'https://www.wco.tv.evil.invalid/'
+    ]) {
+        await assert.rejects(
+            readPublicWcoPage(new URL(u), AbortSignal.timeout(1000))
+        );
+    }
 });

@@ -156,3 +156,11 @@ test('provider is opt-in; movies remain unsupported', async () => {
     assert.equal(p.enabled, false);
     assert.equal((await p.getMovieSources()).sources.length, 0);
 });
+test('diacritic-only romanization differences retain exact title identity', async () => {
+    const { provider } = fixture();
+    const result = await provider.getTVSources({
+        ...media,
+        title: 'One Piēce'
+    });
+    assert.equal(result.sources.length, 1);
+});
