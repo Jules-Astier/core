@@ -26,6 +26,8 @@ function fixture(
                 if (u.pathname.includes('/episode/'))
                     return Response.json({ name: 'The Cat Concerto' });
                 return Response.json({
+                    name: 'Tom and Jerry',
+                    title: 'The Cat Concerto',
                     genres: [{ id: o.notAnimation ? 18 : 16 }],
                     original_language: 'en',
                     seasons: [{ season_number: 1, episode_count: 10 }]
@@ -81,4 +83,15 @@ test('non-animation records are skipped and provider defaults disabled', async (
     const { provider } = fixture({ notAnimation: true });
     assert.equal((await provider.getMovieSources(movie)).sources.length, 0);
     assert.equal(new SuperCartoonsProvider({ environment: {} }).enabled, false);
+});
+test('TV episode lookup keeps canonical TMDB series and episode names separate', async () => {
+    const { provider } = fixture();
+    const result = await provider.getTVSources({
+        ...movie,
+        type: 'tv',
+        title: 'An episode title',
+        s: 1,
+        e: 2
+    });
+    assert.equal(result.sources.length, 1);
 });

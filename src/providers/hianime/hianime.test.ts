@@ -20,6 +20,7 @@ function player(value: unknown) {
 function fixture(
     options: {
         ambiguous?: boolean;
+        canonicalTitle?: string;
         badMedia?: boolean;
         htmlMedia?: boolean;
         premium?: boolean;
@@ -31,6 +32,7 @@ function fixture(
         calls.push(u.href);
         if (u.hostname === 'api.themoviedb.org')
             return Response.json({
+                name: options.canonicalTitle ?? 'One Piece',
                 genres: [{ id: 16 }],
                 original_language: 'ja',
                 seasons: [
@@ -157,10 +159,10 @@ test('provider is opt-in; movies remain unsupported', async () => {
     assert.equal((await p.getMovieSources()).sources.length, 0);
 });
 test('diacritic-only romanization differences retain exact title identity', async () => {
-    const { provider } = fixture();
+    const { provider } = fixture({ canonicalTitle: 'One Piēce' });
     const result = await provider.getTVSources({
         ...media,
-        title: 'One Piēce'
+        title: 'An episode title, not the series name'
     });
     assert.equal(result.sources.length, 1);
 });

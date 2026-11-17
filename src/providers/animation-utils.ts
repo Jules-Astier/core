@@ -81,7 +81,7 @@ export async function animationMetadata(
     if (!d.genres?.some((g: { id: number }) => g.id === 16)) return null;
     if (media.type === 'movie')
         return {
-            title: media.title,
+            title: typeof d.title === 'string' ? d.title : media.title,
             seriesTitle: null,
             absolute: null,
             language:
@@ -104,7 +104,7 @@ export async function animationMetadata(
     if (typeof ep.name !== 'string' || !ep.name.trim()) return null;
     return {
         title: ep.name,
-        seriesTitle: media.title,
+        seriesTitle: typeof d.name === 'string' ? d.name : '',
         absolute,
         language:
             typeof d.original_language === 'string'

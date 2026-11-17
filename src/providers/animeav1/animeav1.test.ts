@@ -29,6 +29,7 @@ function fixture(
                     u.pathname.includes('/episode/')
                         ? { name: 'Episode One' }
                         : {
+                              name: 'One Piece',
                               genres: [{ id: 16 }],
                               original_language: 'ja',
                               seasons: [{ season_number: 1, episode_count: 61 }]
@@ -80,4 +81,12 @@ test('movies are unsupported and adapter defaults disabled', async () => {
     const p = new AnimeAv1Provider({ environment: {} });
     assert.equal(p.enabled, false);
     assert.equal((await p.getMovieSources()).sources.length, 0);
+});
+test('framework episode-title input is not used as the series slug', async () => {
+    const { provider } = fixture();
+    assert.equal(
+        (await provider.getTVSources({ ...media, title: 'An episode title' }))
+            .sources.length,
+        1
+    );
 });

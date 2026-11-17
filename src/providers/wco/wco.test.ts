@@ -51,6 +51,7 @@ function fixture(
             calls.push(u.href);
             if (u.hostname === 'api.themoviedb.org')
                 return Response.json({
+                    name: 'One Piece',
                     genres: [{ id: 16 }],
                     original_language: 'ja',
                     seasons: [{ season_number: 1, episode_count: 61 }]
@@ -146,6 +147,14 @@ test('WCO is opt-in and does not claim movie support', async () => {
         subtitles: [],
         diagnostics: []
     });
+});
+test('framework episode-title input uses canonical TMDB series identity', async () => {
+    const { provider } = fixture();
+    const result = await provider.getTVSources({
+        ...media,
+        title: 'An episode title'
+    });
+    assert.equal(result.sources.length, 1);
 });
 test('public-page transport rejects non-WCO and private origins before spawning', async () => {
     for (const u of [

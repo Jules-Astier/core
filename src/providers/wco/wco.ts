@@ -187,12 +187,15 @@ export class WcoProvider extends BaseProvider {
                     signal
                 )
             );
+            const seriesTitle = details.name;
+            if (typeof seriesTitle !== 'string' || !seriesTitle.trim())
+                return empty('canonical TMDB series name unavailable');
             if (!details.genres?.some((g: { id: number }) => g.id === 16))
                 return { sources: [], subtitles: [], diagnostics: [] };
             const absolute = absoluteEpisode(details, media.s!, media.e!);
             if (!absolute)
                 return empty('unsupported or incomplete episode numbering');
-            const slug = media.title
+            const slug = seriesTitle
                 .normalize('NFKD')
                 .replace(/[\u0300-\u036f]/g, '')
                 .toLowerCase()
@@ -207,7 +210,7 @@ export class WcoProvider extends BaseProvider {
             );
             if (
                 ![...listing('h1, .film-name')].some(
-                    (el) => normal(listing(el).text()) === normal(media.title)
+                    (el) => normal(listing(el).text()) === normal(seriesTitle)
                 )
             )
                 return empty('series title does not match exactly');

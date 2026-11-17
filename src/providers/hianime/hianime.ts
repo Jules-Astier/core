@@ -14,6 +14,7 @@ const MEDIA = ['dramahot.top'];
 const UA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 type Series = {
+    name?: string;
     genres?: { id: number }[];
     original_language?: string;
     seasons?: { season_number: number; episode_count: number }[];
@@ -132,6 +133,9 @@ export class HiAnimeProvider extends BaseProvider {
                     signal
                 )
             ) as Series;
+            const seriesTitle = series.name;
+            if (typeof seriesTitle !== 'string' || !seriesTitle.trim())
+                return empty('canonical TMDB series name unavailable');
             if (!series.genres?.some((g) => g.id === 16))
                 return { sources: [], subtitles: [], diagnostics: [] };
             const episode = absoluteEpisode(series, media.s!, media.e!);
@@ -142,7 +146,7 @@ export class HiAnimeProvider extends BaseProvider {
                     new URL(
                         '/search?keyword=' +
                             encodeURIComponent(
-                                media.title
+                                seriesTitle
                                     .normalize('NFKD')
                                     .replace(/\p{M}/gu, '')
                             ),
@@ -157,7 +161,7 @@ export class HiAnimeProvider extends BaseProvider {
                 const a = search(el);
                 if (
                     [a.attr('title'), a.attr('data-jname'), a.text()].some(
-                        (t) => t && normalize(t) === normalize(media.title)
+                        (t) => t && normalize(t) === normalize(seriesTitle)
                     )
                 ) {
                     const url = new URL(a.attr('href') ?? '', ORIGIN);

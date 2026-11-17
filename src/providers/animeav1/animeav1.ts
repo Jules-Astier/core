@@ -62,7 +62,9 @@ export class AnimeAv1Provider extends BaseProvider {
                 signal
             );
             if (!identity?.absolute) return empty();
-            const slug = titleSlug(media.title);
+            if (!identity.seriesTitle)
+                return empty('canonical TMDB series name unavailable');
+            const slug = titleSlug(identity.seriesTitle);
             const path = '/media/' + slug;
             const series = load(
                 await boundedText(
@@ -73,7 +75,10 @@ export class AnimeAv1Provider extends BaseProvider {
                     this.HEADERS
                 )
             );
-            if (titleKey(series('h1').first().text()) !== titleKey(media.title))
+            if (
+                titleKey(series('h1').first().text()) !==
+                titleKey(identity.seriesTitle)
+            )
                 return empty('series title does not match exactly');
             const page = load(
                 await boundedText(
