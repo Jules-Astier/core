@@ -4,7 +4,7 @@
     "type": "module",
     "scripts": {
         "dev": "tsx watch src/server.ts",
-        "build": "tsc",
+        "build": "tsc && node scripts/copy-provider-assets.mjs",
         "start": "npm run build && node dist/server.js",
         "test": "node scripts/run-tests.mjs && node --test test/*.test.mjs",
         "test:provider": "tsx --test",

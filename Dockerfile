@@ -14,7 +14,7 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache chromium
+RUN apk add --no-cache chromium python3
 
 ARG VERSION
 ARG REVISION

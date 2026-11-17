@@ -139,7 +139,12 @@ export class HiAnimeProvider extends BaseProvider {
             const search = load(
                 await this.read(
                     new URL(
-                        '/search?keyword=' + encodeURIComponent(media.title),
+                        '/search?keyword=' +
+                            encodeURIComponent(
+                                media.title
+                                    .normalize('NFKD')
+                                    .replace(/\p{M}/gu, '')
+                            ),
                         ORIGIN
                     ),
                     ['hianime.ba'],

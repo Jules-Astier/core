@@ -7,6 +7,8 @@ import type {
 } from '@omss/framework';
 import { load } from 'cheerio';
 import { absoluteEpisode } from '../hianime/hianime.js';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const ORIGIN = 'https://www.wco.tv';
 const HEADERS = {
@@ -30,6 +32,58 @@ const valid = (u: URL, hosts: string[]) =>
 const PAGE_HOSTS = ['www.wco.tv'],
     PLAYER_HOSTS = ['embed.wcostream.com'],
     MEDIA_HOSTS = ['wcostream.com'];
+
+/** Different standard HTTP clients receive different WCO responses. Keep this
+ * transport public-only, bounded, cookie-free and inside the provider deadline. */
+export function readPublicWcoPage(
+    url: URL,
+    signal: AbortSignal
+): Promise<Response> {
+    if (!valid(url, PAGE_HOSTS) || signal.aborted)
+        return Promise.reject(new Error('Unsupported public page'));
+    return new Promise((resolve, reject) => {
+        const child = spawn(
+            'python3',
+            [fileURLToPath(new URL('./public-page.py', import.meta.url))],
+            { stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        let output = '',
+            stopped = false;
+        const abort = () => {
+            stopped = true;
+            child.kill();
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        child.stdout.on('data', (chunk) => {
+            output += chunk.toString();
+            if (output.length > 8 * 1024 * 1024) abort();
+        });
+        // Discard diagnostics from the child: upstream tokens and bodies must not be logged.
+        child.stderr.resume();
+        child.stdin.on('error', () => {});
+        child.on('error', () => {
+            signal.removeEventListener('abort', abort);
+            reject(new Error('Public-page transport unavailable'));
+        });
+        child.on('close', (code) => {
+            signal.removeEventListener('abort', abort);
+            if (code !== 0 || stopped)
+                return reject(new Error('Public-page transport failed'));
+            try {
+                const value = JSON.parse(output);
+                if (
+                    !Number.isInteger(value.status) ||
+                    typeof value.body !== 'string'
+                )
+                    throw new Error();
+                resolve(new Response(value.body, { status: value.status }));
+            } catch {
+                reject(new Error('Invalid public-page response'));
+            }
+        });
+        child.stdin.end(JSON.stringify({ url: url.href }));
+    });
+}
 
 /** Parse the site's public character-array serialization without evaluating JavaScript. */
 export function publicIframe(html: string): string | null {
@@ -264,11 +318,15 @@ export class WcoProvider extends BaseProvider {
         signal: AbortSignal
     ): Promise<string> {
         if (!valid(u, hosts)) throw new Error('unsupported host');
-        const r = await this.fetchImpl(u.href, {
+        let r = await this.fetchImpl(u.href, {
             headers: HEADERS,
             signal,
             redirect: 'manual'
         });
+        if (r.status === 403 && u.hostname === 'www.wco.tv') {
+            await r.body?.cancel();
+            r = await readPublicWcoPage(u, signal);
+        }
         if (!r.ok || !r.body) throw new Error('upstream HTTP failure');
         const reader = r.body.getReader();
         const chunks: Uint8Array[] = [];
@@ -288,7 +346,8 @@ export class WcoProvider extends BaseProvider {
     }
     private async verify(u: URL, signal: AbortSignal): Promise<boolean> {
         for (let i = 0; i < 4; i++) {
-            if (!valid(u, MEDIA_HOSTS)) return false;
+            if (!valid(u, MEDIA_HOSTS) || /\/error\.mp4$/i.test(u.pathname))
+                return false;
             const r = await this.fetchImpl(u.href, {
                 headers: {
                     ...HEADERS,

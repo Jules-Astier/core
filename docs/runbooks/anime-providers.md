@@ -53,3 +53,11 @@ Croissant Paul job. Live verification must distinguish discovery, verification,
 manifest/ranged-MP4 access and actual player acceptance. Paul success alone is
 not proof of VPS or device playback. Keep both flags disabled by default until
 registered-provider and Saucy/player canaries pass.
+
+WCO transport note: Node fetch and Chromium returned a Cloudflare challenge for
+public pages in the same environment where Python's standard urllib returned
+the real public HTML. A narrowly scoped Python3 transport is used only after
+a WCO-origin403; it is bounded, cookie-free, refuses redirects and never solves
+CAPTCHAs or accepts account credentials. Python3 is packaged into the runtime
+image and its helper is copied by the build. Ordinary media remains on the
+existing Node proxy. Public access may still be refused by the upstream.
