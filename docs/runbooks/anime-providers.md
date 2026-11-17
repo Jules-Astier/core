@@ -61,3 +61,21 @@ a WCO-origin403; it is bounded, cookie-free, refuses redirects and never solves
 CAPTCHAs or accepts account credentials. Python3 is packaged into the runtime
 image and its helper is copied by the build. Ordinary media remains on the
 existing Node proxy. Public access may still be refused by the upstream.
+
+## Additional public sources
+
+`SUPERCARTOONS_ENABLED=true` adds verified public classic-cartoon MP4s. Movie
+and TV episode titles must match exactly; TV lookups also verify the series
+name against the source page. The source's own declared audio language is used.
+No upload date is substituted for the original film release date.
+
+`ANIMEAV1_ENABLED=true` adds the public Zilla HLS player on AnimeAV1. It requires
+an exact series title and absolute episode number and labels the Spanish
+subtitles separately from the original audio language. Only its public HLS
+player is implemented; Voe/UPN/other embedded mirrors are not counted as extra
+sources. Codec compatibility on an older LG TV is not implied by valid HLS.
+
+All four providers remain opt-in in source. The deployment canary enables them
+explicitly after fixture, public-media, and registered-proxy checks. Generic
+Fight Club/Game of Thrones resolver rechecks are not acceptance tests for these
+animation-specific providers; the live canary uses animation identities.

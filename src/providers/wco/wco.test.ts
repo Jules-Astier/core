@@ -46,7 +46,7 @@ function fixture(
     const calls: string[] = [];
     const provider = new WcoProvider({
         environment: { WCO_ENABLED: 'true', TMDB_API_KEY: 'fixture-secret' },
-        fetch: async (input) => {
+        fetch: async (input, init) => {
             const u = new URL(String(input));
             calls.push(u.href);
             if (u.hostname === 'api.themoviedb.org')
@@ -69,11 +69,18 @@ function fixture(
                 return new Response(
                     '<script>$.getJSON("/inc/embed/getvidlink.php?v=synthetic", function(r){});</script>'
                 );
-            if (u.pathname.endsWith('getvidlink.php'))
+            if (u.pathname.endsWith('getvidlink.php')) {
+                const headers = new Headers(init?.headers);
+                assert.equal(headers.get('X-Requested-With'), 'XMLHttpRequest');
+                assert.equal(
+                    headers.get('Referer'),
+                    'https://embed.wcostream.com/'
+                );
                 return Response.json({
                     server: 'https://neptun.wcostream.com',
                     fhd: 'synthetic-token'
                 });
+            }
             if (u.hostname === 'neptun.wcostream.com')
                 return new Response(null, {
                     status: 302,

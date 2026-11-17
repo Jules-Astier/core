@@ -146,6 +146,18 @@ export class WcoProvider extends BaseProvider {
         this.apiKey = env.TMDB_API_KEY ?? '';
         this.fetchImpl = deps.fetch ?? fetch;
     }
+    async healthCheck(): Promise<boolean> {
+        try {
+            await this.read(
+                new URL(ORIGIN),
+                PAGE_HOSTS,
+                AbortSignal.timeout(8000)
+            );
+            return true;
+        } catch {
+            return false;
+        }
+    }
     async getMovieSources(): Promise<ProviderResult> {
         return { sources: [], subtitles: [], diagnostics: [] };
     }
@@ -320,7 +332,14 @@ export class WcoProvider extends BaseProvider {
     ): Promise<string> {
         if (!valid(u, hosts)) throw new Error('unsupported host');
         let r = await this.fetchImpl(u.href, {
-            headers: HEADERS,
+            headers:
+                u.pathname === '/inc/embed/getvidlink.php'
+                    ? {
+                          ...HEADERS,
+                          Referer: 'https://embed.wcostream.com/',
+                          'X-Requested-With': 'XMLHttpRequest'
+                      }
+                    : HEADERS,
             signal,
             redirect: 'manual'
         });
