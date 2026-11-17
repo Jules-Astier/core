@@ -131,10 +131,7 @@ test('resolves exact absolute episode and wraps verified media and subtitles', a
     assert.equal(r.sources[0].audioTracks[0].language, 'ja');
     assert.equal(r.subtitles[0].format, 'vtt');
     const proxy = JSON.parse(
-        Buffer.from(
-            new URL(r.sources[0].url).searchParams.get('data')!,
-            'base64'
-        ).toString()
+        new URL(r.sources[0].url).searchParams.get('data')!
     );
     assert.equal(proxy.headers.Referer, 'https://zokoanime.video/');
 });

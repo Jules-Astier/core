@@ -106,10 +106,7 @@ test('exact public episode resolves verified ranged MP4 with required headers', 
     assert.equal(r.sources[0].audioTracks[0].language, 'ja');
     assert.ok(!calls.some((u) => u.includes('episode-10-')));
     const proxy = JSON.parse(
-        Buffer.from(
-            new URL(r.sources[0].url).searchParams.get('data')!,
-            'base64'
-        ).toString()
+        new URL(r.sources[0].url).searchParams.get('data')!
     );
     assert.equal(proxy.headers.Referer, 'https://embed.wcostream.com/');
 });
