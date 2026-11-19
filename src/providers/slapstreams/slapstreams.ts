@@ -73,6 +73,22 @@ export function slapTeamPage(
     return pages.size === 1 ? [...pages][0] : undefined;
 }
 
+/**
+ * NHL Web's status comes from a cached schedule (NHLWEB_CACHE_TTL_SECONDS,
+ * 15 minutes in Saucy), so a game that has just started can still read
+ * `scheduled`. Treat it as in play once its start time has passed; ended and
+ * postponed games never match.
+ */
+export function slapEventInPlay(
+    event: Pick<LiveEventManifest, 'status' | 'startsAt'>,
+    now = Date.now()
+): boolean {
+    if (event.status === 'live') return true;
+    if (event.status !== 'scheduled') return false;
+    const startsAt = new Date(event.startsAt).getTime();
+    return Number.isFinite(startsAt) && startsAt <= now;
+}
+
 function mediaUrl(value: string, base?: string): URL {
     const url = new URL(value, base);
     if (!MEDIA_ORIGINS.has(url.origin) || url.username || url.password) {
@@ -151,7 +167,7 @@ export class SlapStreamsProvider extends BaseProvider implements LiveProvider {
         )?.internalEventId;
         if (
             !this.enabled ||
-            event.status !== 'live' ||
+            !slapEventInPlay(event) ||
             !/^nhl:\d{10}$/.test(identity ?? '')
         )
             return;
