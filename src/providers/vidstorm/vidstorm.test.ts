@@ -124,7 +124,8 @@ for (const media of [movie, episode])
 test('enables VidStorm by default and honours the opt-out and leaf controls', async () => {
     assert.equal(fixture().provider.enabled, true);
     assert.equal(
-        fixture({ environment: { VIDSTORM_ENABLED: 'false' } }).provider.enabled,
+        fixture({ environment: { VIDSTORM_ENABLED: 'false' } }).provider
+            .enabled,
         false
     );
     const onlyHelium = fixture({
