@@ -48,10 +48,14 @@ RUN npm ci --only=production && node scripts/patch-framework-ranges.mjs
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/config ./config
 
-# Release managers may stage the Git worktree with a restrictive umask. Keep
-# the runtime image non-root while making static configuration traversable and
-# readable regardless of the source checkout's host-side modes.
-RUN chmod -R a+rX ./config
+# Release managers may stage the Git worktree with a restrictive umask (077),
+# so copied files can arrive as 0600 root. Keep the runtime image non-root
+# while making everything the runtime reads traversable and readable for the
+# nodejs user regardless of the source checkout's host-side modes: the compiled
+# code and its provider assets (the WCO provider runs
+# dist/providers/wco/public-page.py), static configuration, the scripts and
+# package.json (Node reads it to resolve the module type).
+RUN chmod -R a+rX ./dist ./config ./scripts package.json package-lock.json
 
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
