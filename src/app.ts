@@ -13,6 +13,10 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { knownThirdPartyProxies } from './thirdPartyProxies.js';
+import {
+    createInProcessProxy,
+    type InProcessProxy
+} from './in-process-proxy.js';
 import { streamPatterns } from './streamPatterns.js';
 import {
     installProviderHealthControl,
@@ -48,6 +52,12 @@ export type CineProApp = {
      * 'connection', socket)`) without listening on a port.
      */
     httpServer: HttpServer;
+    /**
+     * `GET|HEAD /v1/proxy` called in-process (src/in-process-proxy.ts): the
+     * route's answer without HTTP framing, for an embedding host's media
+     * relay.
+     */
+    proxy: InProcessProxy;
     /** The internal recheck server, when a recheck token is configured. */
     recheckServer?: HttpServer;
     recheckPort: number;
@@ -65,6 +75,14 @@ export async function createCinePro(
 ): Promise<CineProApp> {
     const env = options.env ?? process.env;
     const host = options.host ?? env.HOST ?? 'localhost';
+    const cors = {
+        origin: env.CORS_ORIGIN ?? '*',
+        methods: ['GET', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        exposedHeaders: ['Content-Range', 'Accept-Ranges', 'ETag'],
+        preflightContinue: false,
+        optionsSuccessStatus: 204
+    };
     const port = options.port ?? Number(env.PORT ?? 3000);
     const omss = new OMSSServer({
         name: 'CinePro',
@@ -103,14 +121,7 @@ export async function createCinePro(
             streamPatterns
         },
 
-        cors: {
-            origin: env.CORS_ORIGIN ?? '*',
-            methods: ['GET', 'OPTIONS'],
-            allowedHeaders: ['Content-Type', 'Authorization'],
-            exposedHeaders: ['Content-Range', 'Accept-Ranges', 'ETag'],
-            preflightContinue: false,
-            optionsSuccessStatus: 204
-        },
+        cors,
 
         stremio: {
             // exposes a stremio addon on /stremio/manifest.json
@@ -143,6 +154,8 @@ export async function createCinePro(
     // Routes, plugins and hooks are registered; requests can be routed.
     await fastify.ready();
 
+    const proxy = await createInProcessProxy(omss, cors);
+
     let recheckServer: HttpServer | undefined;
     let recheckPort = 3011;
     let recheckHost = env.CINEPRO_INTERNAL_RECHECK_HOST ?? '127.0.0.1';
@@ -173,6 +186,7 @@ export async function createCinePro(
     return {
         omss,
         httpServer: fastify.server,
+        proxy,
         recheckServer,
         recheckPort,
         recheckHost,
