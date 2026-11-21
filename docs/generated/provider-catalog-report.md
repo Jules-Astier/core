@@ -13,14 +13,14 @@ Runtime providers discovered: 41
 | Value | Count |
 | --- | ---: |
 | browser-pass | 5 |
-| deferred | 17 |
+| deferred | 13 |
 | degraded | 2 |
 | deterministic-pass | 1 |
 | disabled | 3 |
 | discovered | 66 |
 | live-pass | 7 |
 | rejected | 5 |
-| researching | 20 |
+| researching | 24 |
 | retired | 1 |
 | saucy-pass | 2 |
 | seed-needed | 86 |
@@ -415,7 +415,7 @@ None.
 | `animeunity` | provider | seed-needed | `animeunity` | — | movie, tv | hls, mp4 |
 | `animeworld` | provider | seed-needed | `animeworld` | — | movie, tv | hls, mp4 |
 | `anyembed` | aggregator | disabled | `anyembed` | `anyembed` | movie, tv | embed |
-| `apisports` | provider | deferred | `apisports` | `apisports` | live | metadata |
+| `apisports` | provider | researching | `apisports` | `apisports` | live | metadata |
 | `bcine` | provider | seed-needed | `bcine` | — | movie, tv | hls, mp4 |
 | `cinefreak` | provider | deferred | `cinefreak` | — | movie, tv | direct-download |
 | `cinemitas` | provider | seed-needed | `cinemitas` | — | movie, tv | hls, mp4 |
@@ -424,7 +424,7 @@ None.
 | `cinesu` | provider | discovered | `cinesu` | `CineSu` | movie, tv | hls |
 | `coflix` | provider | seed-needed | `coflix` | — | movie, tv | hls, mp4 |
 | `cuevana-ubd` | provider | seed-needed | `cuevana-ubd` | — | movie, tv | hls, mp4 |
-| `daddylive` | provider | deferred | `daddylive` | `daddylive` | live | hls |
+| `daddylive` | provider | researching | `daddylive` | `daddylive` | live | hls |
 | `disney-plus` | provider | rejected | `disney-plus` | — | movie, tv | drm |
 | `diziyou` | provider | seed-needed | `diziyou` | — | movie, tv | hls, mp4 |
 | `dood` | embed_host | seed-needed | `dood` | — | movie, tv | embed |
@@ -475,10 +475,10 @@ None.
 | `nakios` | provider | seed-needed | `nakios` | — | movie, tv | hls, mp4 |
 | `netflix` | provider | rejected | `netflix` | — | movie, tv | drm |
 | `nhl24all` | provider | researching | `nhl24all` | `nhl24all` | live | hls |
-| `nhlweb` | provider | deferred | `nhlweb` | `nhlweb` | live | metadata |
+| `nhlweb` | provider | researching | `nhlweb` | `nhlweb` | live | metadata |
 | `nites` | provider | seed-needed | `nites` | — | movie, tv | hls, mp4 |
 | `onlykdrama` | provider | seed-needed | `onlykdrama` | — | movie, tv | hls, mp4 |
-| `openf1` | provider | deferred | `openf1` | `openf1` | live | metadata |
+| `openf1` | provider | researching | `openf1` | `openf1` | live | metadata |
 | `papadustream` | provider | live-pass | `papadustream` | `papadustream` | movie, tv | hls |
 | `peachify` | aggregator | discovered | `peachify` | `Peachify` | movie, tv | hls, mp4 |
 | `peachify:air` | upstream | discovered | `peachify` | — | movie, tv | hls, mp4 |
