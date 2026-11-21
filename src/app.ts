@@ -69,10 +69,11 @@ export type CineProApp = {
     stop(): Promise<void>;
 };
 
-/** Build CinePro: providers discovered, health control installed, routes ready. */
-export async function createCinePro(
-    options: CineProOptions = {}
-): Promise<CineProApp> {
+/**
+ * The OMSS server's configuration, shared by createCinePro and
+ * createCineProProxy so both answer `/v1/proxy` identically.
+ */
+function serverConfig(options: CineProOptions) {
     const env = options.env ?? process.env;
     const host = options.host ?? env.HOST ?? 'localhost';
     const cors = {
@@ -84,7 +85,7 @@ export async function createCinePro(
         optionsSuccessStatus: 204
     };
     const port = options.port ?? Number(env.PORT ?? 3000);
-    const omss = new OMSSServer({
+    const config: ConstructorParameters<typeof OMSSServer>[0] = {
         name: 'CinePro',
         version: '1.0.0',
 
@@ -134,7 +135,16 @@ export async function createCinePro(
         mcp: {
             enabled: env.MCP_ENABLED === 'true'
         }
-    });
+    };
+    return { env, cors, config };
+}
+
+/** Build CinePro: providers discovered, health control installed, routes ready. */
+export async function createCinePro(
+    options: CineProOptions = {}
+): Promise<CineProApp> {
+    const { env, cors, config } = serverConfig(options);
+    const omss = new OMSSServer(config);
 
     // Register providers
     const registry = omss.getRegistry();
@@ -213,6 +223,53 @@ export async function createCinePro(
                 }
                 await omss.stop();
             })();
+            return stopped;
+        }
+    };
+}
+
+export type CineProProxy = {
+    /** `GET|HEAD /v1/proxy` in-process, as CineProApp.proxy. */
+    proxy: InProcessProxy;
+    /** Release the server. Idempotent. */
+    stop(): Promise<void>;
+};
+
+/**
+ * CinePro's `/v1/proxy` alone: the framework's proxy route with CinePro's
+ * configuration (stream patterns, CORS), and no providers, catalog, health
+ * control or listener. The proxy route uses nothing a provider registers:
+ * every upstream URL, header and transform travels in the request's `data`
+ * parameter, which CinePro's source routes wrote. An embedding host can run
+ * the media relay's byte path with this in its own thread while the
+ * providers run elsewhere (Saucy Streams' unified backend runs CinePro in a
+ * worker thread, slice U7).
+ */
+export async function createCineProProxy(
+    options: CineProOptions = {}
+): Promise<CineProProxy> {
+    const { cors, config } = serverConfig(options);
+    // The proxy route reads no cache, TMDB, Stremio or MCP: none of them
+    // may need a service (Redis) or a key here.
+    const omss = new OMSSServer({
+        ...config,
+        cache: { ...config.cache, type: 'memory' },
+        tmdb: {
+            ...config.tmdb,
+            apiKey: config.tmdb?.apiKey || 'unused-by-the-proxy'
+        },
+        stremio: { enableNativeAddon: false, stremioAddons: [] },
+        mcp: { enabled: false }
+    });
+    const fastify = omss.getInstance();
+    await fastify.ready();
+    const proxy = await createInProcessProxy(omss, cors);
+    let stopped: Promise<void> | undefined;
+    return {
+        proxy,
+        stop() {
+            // OMSSServer.stop also clears the memory cache's timer.
+            stopped ??= omss.stop();
             return stopped;
         }
     };

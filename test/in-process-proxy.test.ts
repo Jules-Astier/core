@@ -2,6 +2,8 @@
 // of the same server: status, headers and body bytes must match for every
 // kind of answer the relay sees (buffered segments, rewritten playlists,
 // streamed ranges, 416, upstream failures, bad parameters, HEAD, Accept).
+// The provider-less proxy of src/app.ts (createCineProProxy, CinePro's own
+// configuration) must answer the same.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
@@ -10,6 +12,7 @@ import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 import { OMSSServer } from '@omss/framework';
 import { createInProcessProxy } from '../src/in-process-proxy.js';
+import { createCineProProxy } from '../src/app.js';
 import { streamPatterns } from '../src/streamPatterns.js';
 
 // As deployed: error bodies without stacks.
@@ -147,8 +150,15 @@ test('the in-process proxy answers exactly as the HTTP route', async (t) => {
     await fastify.listen({ port: 0, host: '127.0.0.1' });
     const port = (fastify.server.address() as AddressInfo).port;
     const proxy = await createInProcessProxy(omss, cors);
+    const quietStart = t.mock.method(console, 'log', () => {});
+    const alone = await createCineProProxy({
+        env: { NODE_ENV: 'production' },
+        publicUrl: 'http://cinepro.test:3000'
+    });
+    quietStart.mock.restore();
     t.after(async () => {
         await omss.stop();
+        await alone.stop();
         upstream.closeAllConnections();
         upstream.close();
         if (previousKey === undefined) delete process.env.TMDB_API_KEY;
@@ -181,19 +191,25 @@ test('the in-process proxy answers exactly as the HTTP route', async (t) => {
     try {
         for (const [name, method, search, headers] of cases) {
             const http = await viaHttp(port, method, `/v1/proxy${search}`, headers);
-            const local = await proxy({ method, search, headers });
-            const localBody = await bodyOf(local.body);
-            local.done();
-            const normalize = (s: string) => s.replace(UUID, '<uuid>');
-            assert.equal(local.status, http.status, `${name}: status`);
-            assert.deepEqual(
-                JSON.parse(normalize(JSON.stringify(local.headers))),
-                JSON.parse(normalize(JSON.stringify(http.headers))),
-                `${name}: headers`
-            );
-            if (http.headers['content-type']?.startsWith('application/json'))
-                assert.equal(normalize(localBody.toString()), normalize(http.body.toString()), `${name}: body`);
-            else assert.ok(localBody.equals(http.body), `${name}: body bytes`);
+            for (const [kind, call] of [
+                ['in-process', proxy],
+                ['createCineProProxy', alone.proxy]
+            ] as const) {
+                const local = await call({ method, search, headers });
+                const localBody = await bodyOf(local.body);
+                local.done();
+                const label = `${name} (${kind})`;
+                const normalize = (s: string) => s.replace(UUID, '<uuid>');
+                assert.equal(local.status, http.status, `${label}: status`);
+                assert.deepEqual(
+                    JSON.parse(normalize(JSON.stringify(local.headers))),
+                    JSON.parse(normalize(JSON.stringify(http.headers))),
+                    `${label}: headers`
+                );
+                if (http.headers['content-type']?.startsWith('application/json'))
+                    assert.equal(normalize(localBody.toString()), normalize(http.body.toString()), `${label}: body`);
+                else assert.ok(localBody.equals(http.body), `${label}: body bytes`);
+            }
         }
     } finally {
         quiet.mock.restore();
