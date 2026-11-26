@@ -10,7 +10,7 @@ import type {
 export class VidSrcProvider extends BaseProvider {
     readonly id = 'vidsrc';
     readonly name = 'VidSrc';
-    readonly enabled = process.env.VIDSRC_ENABLED === 'true';
+    readonly enabled = (process.env.VIDSRC_ENABLED ?? 'true') === 'true';
     readonly BASE_URL = 'https://vsembed.ru/';
     readonly HEADERS = {
         'User-Agent':

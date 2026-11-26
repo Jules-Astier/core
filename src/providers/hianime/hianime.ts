@@ -100,7 +100,7 @@ export class HiAnimeProvider extends BaseProvider {
     constructor(deps: Dependencies = {}) {
         super();
         const env = deps.environment ?? process.env;
-        this.enabled = env.HIANIME_ENABLED === 'true';
+        this.enabled = (env.HIANIME_ENABLED ?? 'true') === 'true';
         this.apiKey = env.TMDB_API_KEY ?? '';
         this.fetchImpl = deps.fetch ?? fetch;
     }

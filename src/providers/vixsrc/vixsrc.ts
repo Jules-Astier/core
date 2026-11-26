@@ -6,6 +6,7 @@ import type {
     Source,
     Subtitle
 } from '@omss/framework';
+import { parseHeadlessVidXOrigin } from '../headlessvidx-origin.js';
 import type { VixSrcApiResponse } from './vixsrc.types.js';
 import {
     fetchPublicPlayerPlaylist,
@@ -23,6 +24,7 @@ type VixSrcDependencies = {
     readonly now?: () => number;
     readonly resolutionMode?: string;
     readonly headlessVidXBaseUrl?: string;
+    readonly environment?: NodeJS.ProcessEnv;
 };
 
 type MasterPlaylistData = {
@@ -50,7 +52,7 @@ class VixSrcHttpError extends Error {
 export class VixSrcProvider extends BaseProvider {
     readonly id = 'vixsrc';
     readonly name = 'VixSrc';
-    readonly enabled = process.env.VIXSRC_ENABLED === 'true';
+    readonly enabled: boolean;
     readonly BASE_URL: string;
     readonly HEADERS: Record<string, string>;
 
@@ -65,10 +67,10 @@ export class VixSrcProvider extends BaseProvider {
 
     constructor(dependencies: VixSrcDependencies = {}) {
         super();
+        const env = dependencies.environment ?? process.env;
+        this.enabled = (env.VIXSRC_ENABLED ?? 'true') === 'true';
         this.BASE_URL = this.normalizeBaseUrl(
-            dependencies.baseUrl ??
-                process.env.VIXSRC_BASE_URL ??
-                DEFAULT_BASE_URL
+            dependencies.baseUrl ?? env.VIXSRC_BASE_URL ?? DEFAULT_BASE_URL
         );
         this.HEADERS = {
             'User-Agent':
@@ -80,12 +82,17 @@ export class VixSrcProvider extends BaseProvider {
         };
         this.fetchImpl = dependencies.fetch ?? fetch;
         this.now = dependencies.now ?? Date.now;
-        this.usePublicPlayer =
-            (dependencies.resolutionMode ??
-                process.env.VIXSRC_RESOLUTION_MODE) === 'public-player';
         this.headlessVidXBaseUrl =
             dependencies.headlessVidXBaseUrl ??
-            process.env.VIXSRC_HEADLESSVIDX_BASE_URL;
+            env.VIXSRC_HEADLESSVIDX_BASE_URL ??
+            env.CINEPRO_HEADLESSVIDX_BASE_URL;
+        const resolutionMode =
+            dependencies.resolutionMode ?? env.VIXSRC_RESOLUTION_MODE;
+        this.usePublicPlayer =
+            resolutionMode === 'public-player' ||
+            (resolutionMode === undefined &&
+                this.BASE_URL === DEFAULT_BASE_URL &&
+                Boolean(this.headlessVidXBaseUrl?.trim()));
     }
 
     async getMovieSources(media: ProviderMediaObject): Promise<ProviderResult> {
@@ -400,6 +407,21 @@ export class VixSrcProvider extends BaseProvider {
 
     async healthCheck(): Promise<boolean> {
         try {
+            if (this.usePublicPlayer) {
+                const origin = parseHeadlessVidXOrigin(
+                    this.headlessVidXBaseUrl
+                );
+                if (!origin || this.BASE_URL !== DEFAULT_BASE_URL) return false;
+                const response = await this.fetchImpl(
+                    new URL('/healthz', origin),
+                    {
+                        method: 'HEAD',
+                        redirect: 'error',
+                        signal: AbortSignal.timeout(5_000)
+                    }
+                );
+                return response.ok;
+            }
             const response = await this.fetchImpl(this.BASE_URL, {
                 method: 'HEAD',
                 headers: this.HEADERS

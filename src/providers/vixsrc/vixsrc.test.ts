@@ -324,6 +324,71 @@ test('sends TV and movie identities to the public player and returns direct HLS'
     });
 });
 
+test('defaults to enabled and chooses the sidecar only for the stock origin', async () => {
+    const shared = { CINEPRO_HEADLESSVIDX_BASE_URL: HEADLESSVIDX_BASE_URL };
+    const cases = [
+        { environment: {}, expected: `${PUBLIC_BASE_URL}/api/tv/1396/1/1` },
+        {
+            environment: shared,
+            expected: `${HEADLESSVIDX_BASE_URL}/public-player/vixsrc`
+        },
+        {
+            environment: { ...shared, VIXSRC_RESOLUTION_MODE: 'legacy' },
+            expected: `${PUBLIC_BASE_URL}/api/tv/1396/1/1`
+        },
+        {
+            environment: { ...shared, VIXSRC_BASE_URL: BASE_URL },
+            expected: `${BASE_URL}/api/tv/1396/1/1`
+        },
+        {
+            environment: { ...shared, VIXSRC_HEADLESSVIDX_BASE_URL: '' },
+            expected: `${PUBLIC_BASE_URL}/api/tv/1396/1/1`
+        },
+        {
+            environment: {
+                ...shared,
+                VIXSRC_HEADLESSVIDX_BASE_URL: 'http://dedicated.example'
+            },
+            expected: 'http://dedicated.example/public-player/vixsrc'
+        }
+    ];
+    for (const { environment, expected } of cases) {
+        const calls: string[] = [];
+        const provider = new VixSrcProvider({
+            environment,
+            fetch: async (input) => {
+                calls.push(String(input));
+                return new Response('', { status: 404 });
+            }
+        });
+        assert.equal(provider.enabled, true);
+        await provider.getTVSources(episode);
+        assert.deepEqual(calls, [expected]);
+    }
+    assert.equal(
+        new VixSrcProvider({
+            environment: { ...shared, VIXSRC_ENABLED: 'false' }
+        }).enabled,
+        false
+    );
+});
+
+test('checks the selected sidecar without probing the legacy origin', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const provider = new VixSrcProvider({
+        environment: { CINEPRO_HEADLESSVIDX_BASE_URL: HEADLESSVIDX_BASE_URL },
+        fetch: async (input, init) => {
+            calls.push({ url: String(input), init });
+            return new Response(null, { status: 200 });
+        }
+    });
+    assert.equal(await provider.healthCheck(), true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `${HEADLESSVIDX_BASE_URL}/healthz`);
+    assert.equal(calls[0].init?.method, 'HEAD');
+    assert.equal(calls[0].init?.redirect, 'error');
+});
+
 test('does not fall back to the legacy API when the public player fails', async () => {
     for (const [response, diagnostic] of [
         [() => Response.json({ status: 'blocked' }), /blocked/],

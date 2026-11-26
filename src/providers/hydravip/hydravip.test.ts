@@ -53,8 +53,7 @@ function fixture({
     resolver = () => Response.json({ status: 'resolved', playlistUrl: MASTER }),
     manifest = SEGMENTS,
     environment = {
-        HYDRAVIP_ENABLED: 'true',
-        HYDRAVIP_HEADLESSVIDX_BASE_URL: PLAYER,
+        CINEPRO_HEADLESSVIDX_BASE_URL: PLAYER,
         TMDB_API_KEY: TMDB_KEY
     }
 }: {
@@ -121,7 +120,36 @@ test('resolves the exact canonical series and emits the native HLS master with a
     assert.deepEqual(Object.keys(target.headers), ['Accept']);
 });
 
-test('rejects ambiguous inputs and defaults to disabled', async () => {
+test('requires configured service and key and honors an explicit opt-out', async () => {
+    const configured = {
+        CINEPRO_HEADLESSVIDX_BASE_URL: PLAYER,
+        TMDB_API_KEY: TMDB_KEY
+    };
+    for (const environment of [
+        { ...configured, HYDRAVIP_ENABLED: 'false' },
+        { ...configured, TMDB_API_KEY: undefined },
+        { ...configured, HYDRAVIP_HEADLESSVIDX_BASE_URL: '' },
+        { ...configured, HYDRAVIP_HEADLESSVIDX_BASE_URL: `${PLAYER}/invalid` }
+    ]) {
+        assert.equal(fixture({ environment }).provider.enabled, false);
+    }
+
+    const dedicated = fixture({
+        environment: {
+            ...configured,
+            CINEPRO_HEADLESSVIDX_BASE_URL: 'http://unused.example',
+            HYDRAVIP_HEADLESSVIDX_BASE_URL: PLAYER
+        }
+    });
+    assert.equal(dedicated.provider.enabled, true);
+    assert.equal(
+        (await dedicated.provider.getTVSources(EPISODE)).sources.length,
+        1
+    );
+    assert.equal(dedicated.calls[1].url.origin, PLAYER);
+});
+
+test('rejects ambiguous inputs and skips an unconfigured installation', async () => {
     const { provider, calls } = fixture({ environment: {} });
     assert.equal(provider.enabled, false);
     assert.deepEqual((await provider.getMovieSources()).sources, []);

@@ -1,7 +1,8 @@
 # HiAnime and WCO TV-animation adapters
 
-Both adapters are opt-in: `HIANIME_ENABLED=true` and `WCO_ENABLED=true`.
-They require the existing `TMDB_API_KEY`. They use the standard provider proxy,
+HiAnime HLS is enabled by default. Set `HIANIME_ENABLED=false` to disable it.
+WCO's MP4 adapter uses `WCO_ENABLED=true` for opt-in. Both require the existing
+`TMDB_API_KEY`. They use the standard provider proxy,
 strict framework validation and existing source-language ranking; no client
 binary change is required. They do not return webpage embeds as playable media.
 
@@ -50,9 +51,8 @@ Focused tests cover exact identity/numbering, public serialization, premium
 refusal, hostile media/redirect hosts and HTML masquerading as media. Full build,
 provider-catalog validation/report consistency and bounded live probes run in a
 Croissant Paul job. Live verification must distinguish discovery, verification,
-manifest/ranged-MP4 access and actual player acceptance. Paul success alone is
-not proof of VPS or device playback. Keep both flags disabled by default until
-registered-provider and Saucy/player canaries pass.
+manifest/ranged-MP4 access and actual player acceptance. Verify playback on the
+target device and deployment after updating.
 
 WCO transport note: Node fetch and Chromium returned a Cloudflare challenge for
 public pages in the same environment where Python's standard urllib returned
@@ -69,16 +69,15 @@ and TV episode titles must match exactly; TV lookups also verify the series
 name against the source page. The source's own declared audio language is used.
 No upload date is substituted for the original film release date.
 
-`ANIMEAV1_ENABLED=true` adds the public Zilla HLS player on AnimeAV1. It requires
+AnimeAV1's public Zilla HLS player is enabled by default. Set
+`ANIMEAV1_ENABLED=false` to disable it. It requires
 an exact series title and absolute episode number and labels the Spanish
 subtitles separately from the original audio language. Only its public HLS
 player is implemented; Voe/UPN/other embedded mirrors are not counted as extra
 sources. Codec compatibility on an older LG TV is not implied by valid HLS.
 
-All four providers remain opt-in in source. The deployment canary enables them
-explicitly after fixture, public-media, and registered-proxy checks. Generic
-Fight Club/Game of Thrones resolver rechecks are not acceptance tests for these
-animation-specific providers; the live canary uses animation identities.
+The deployment canary uses animation identities to cover all four providers
+through the registered proxy and player.
 
 ## Executed validation
 

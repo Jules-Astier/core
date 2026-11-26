@@ -1,4 +1,5 @@
 import type { ProviderMediaObject } from '@omss/framework';
+import { parseHeadlessVidXOrigin } from '../headlessvidx-origin.js';
 
 const MAX_PLAYLIST_URL_LENGTH = 4_096;
 const MAX_RESPONSE_BYTES = 16 * 1024;
@@ -12,16 +13,8 @@ export async function fetchPublicPlayerPlaylist(
     fetchImpl: typeof fetch,
     now: () => number
 ): Promise<string | null> {
-    const service = baseUrl && URL.parse(baseUrl);
-    if (
-        !service ||
-        !['http:', 'https:'].includes(service.protocol) ||
-        service.username ||
-        service.password ||
-        service.pathname !== '/' ||
-        service.search ||
-        service.hash
-    ) {
+    const service = parseHeadlessVidXOrigin(baseUrl);
+    if (!service) {
         throw new VixSrcPlayerError(
             'public-player mode requires a valid VIXSRC_HEADLESSVIDX_BASE_URL origin'
         );

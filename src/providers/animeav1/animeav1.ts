@@ -31,7 +31,7 @@ export class AnimeAv1Provider extends BaseProvider {
     ) {
         super();
         const env = deps.environment ?? process.env;
-        this.enabled = env.ANIMEAV1_ENABLED === 'true';
+        this.enabled = (env.ANIMEAV1_ENABLED ?? 'true') === 'true';
         this.key = env.TMDB_API_KEY ?? '';
         this.fetchImpl = deps.fetch ?? fetch;
     }

@@ -1,6 +1,16 @@
 # VixSrc egress runbook
 
-## Current finding
+VixSrc is enabled by default. Set `VIXSRC_ENABLED=false` to disable it. On
+the default public origin, CinePro uses the public-player service when
+`CINEPRO_HEADLESSVIDX_BASE_URL` or `VIXSRC_HEADLESSVIDX_BASE_URL` is configured.
+The provider-specific origin has priority. Set `VIXSRC_RESOLUTION_MODE=legacy`
+to use the legacy API explicitly. A custom `VIXSRC_BASE_URL` also uses the
+legacy API by default.
+
+The public-player route passed the staged Saucy playlist and video segment
+checks on Paul for *Stick* S2E5 and *Chicago Fire* S1E1.
+
+## Earlier legacy API and egress findings
 
 The public `https://vixsrc.to` origin permits the supplied movie seed from a
 normal residential browser but blocks CinePro's data-center egress. This is an

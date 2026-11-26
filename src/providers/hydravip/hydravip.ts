@@ -4,6 +4,7 @@ import type {
     ProviderMediaObject,
     ProviderResult
 } from '@omss/framework';
+import { parseHeadlessVidXOrigin } from '../headlessvidx-origin.js';
 import { parsePapadustreamManifest } from '../papadustream/papadustream.js';
 
 const PLAYER_ROUTE = '/public-player/hydravip';
@@ -30,14 +31,20 @@ export class HydraVipProvider extends BaseProvider {
 
     private readonly fetchImpl: typeof fetch;
     private readonly tmdbApiKey?: string;
-    private readonly playerOrigin?: string;
+    private readonly playerOrigin: URL | null;
 
     constructor(dependencies: Dependencies = {}) {
         super();
         const environment = dependencies.environment ?? process.env;
-        this.enabled = environment.HYDRAVIP_ENABLED === 'true';
         this.tmdbApiKey = environment.TMDB_API_KEY;
-        this.playerOrigin = environment.HYDRAVIP_HEADLESSVIDX_BASE_URL;
+        this.playerOrigin = parseHeadlessVidXOrigin(
+            environment.HYDRAVIP_HEADLESSVIDX_BASE_URL ??
+                environment.CINEPRO_HEADLESSVIDX_BASE_URL
+        );
+        this.enabled =
+            (environment.HYDRAVIP_ENABLED ?? 'true') === 'true' &&
+            Boolean(this.tmdbApiKey) &&
+            this.playerOrigin !== null;
         this.fetchImpl = dependencies.fetch ?? fetch;
     }
 
@@ -64,16 +71,8 @@ export class HydraVipProvider extends BaseProvider {
             );
         }
 
-        const player = this.playerOrigin && URL.parse(this.playerOrigin);
-        if (
-            !player ||
-            !['http:', 'https:'].includes(player.protocol) ||
-            player.username ||
-            player.password ||
-            player.pathname !== '/' ||
-            player.search ||
-            player.hash
-        ) {
+        const player = this.playerOrigin;
+        if (!player) {
             return this.empty(
                 'HYDRAVIP_HEADLESSVIDX_BASE_URL must be a service origin'
             );
