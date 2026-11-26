@@ -212,8 +212,7 @@ test('fails closed on invalid identities, malformed pages, unavailable manifests
     }
 });
 
-test('is opt-in and accepts only a credential-free HTTPS custom origin', () => {
-    assert.equal(new PapadustreamProvider({ environment: {} }).enabled, false);
+test('accepts only a credential-free HTTPS custom origin', () => {
     for (const value of [
         'http://provider.example.test',
         'https://user:pass@provider.example.test',

@@ -151,13 +151,13 @@ test('requests strict normalization only for the verified Vercetti transport', a
     );
 });
 
-test('is opt-in and obeys global leaf switches', async () => {
-    assert.equal(fixture({ environment: {} }).provider.enabled, false);
+test('honors global leaf switches while the provider is enabled', async () => {
     for (const environment of [
         { CINEPRO_PROVIDER_LEAF_DENYLIST: 'framex:executioner' },
         { CINEPRO_PROVIDER_LEAF_ALLOWLIST: 'vidking:yoru' }
     ]) {
         const f = fixture({ environment });
+        assert.equal(f.provider.enabled, true);
         const result = await f.provider.getTVSources(episode);
         assert.equal(result.sources.length, 0);
         assert.equal(f.requests.length, 0);

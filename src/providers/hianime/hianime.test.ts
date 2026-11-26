@@ -153,10 +153,9 @@ test('HTML media errors fail verification without leaking keys or signed URLs', 
     assert.equal(r.sources.length, 0);
     assert.ok(!JSON.stringify(r).includes('fixture-secret'));
 });
-test('provider is opt-in; movies remain unsupported', async () => {
-    const p = new HiAnimeProvider({ environment: {} });
-    assert.equal(p.enabled, false);
-    assert.equal((await p.getMovieSources()).sources.length, 0);
+test('movies remain unsupported', async () => {
+    const provider = new HiAnimeProvider({ environment: {} });
+    assert.equal((await provider.getMovieSources()).sources.length, 0);
 });
 test('diacritic-only romanization differences retain exact title identity', async () => {
     const { provider } = fixture({ canonicalTitle: 'One Piēce' });
