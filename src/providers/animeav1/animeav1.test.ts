@@ -77,9 +77,8 @@ test('unknown player host and HTML playlists cannot become sources', async () =>
         assert.ok(!calls.some((u) => u.includes('127.0.0.1')));
     }
 });
-test('movies are unsupported and adapter defaults disabled', async () => {
+test('movies are unsupported', async () => {
     const p = new AnimeAv1Provider({ environment: {} });
-    assert.equal(p.enabled, false);
     assert.equal((await p.getMovieSources()).sources.length, 0);
 });
 test('framework episode-title input is not used as the series slug', async () => {

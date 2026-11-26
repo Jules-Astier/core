@@ -53,7 +53,7 @@ export class PapadustreamProvider extends BaseProvider {
                 'PAPADUSTREAM_BASE_URL must be an HTTPS origin'
             );
         this.BASE_URL = base.origin;
-        this.enabled = environment.PAPADUSTREAM_ENABLED === 'true';
+        this.enabled = (environment.PAPADUSTREAM_ENABLED ?? 'true') === 'true';
         this.HEADERS = {
             'User-Agent': USER_AGENT,
             Referer: `${this.BASE_URL}/`,

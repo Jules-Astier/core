@@ -50,7 +50,7 @@ export class FramexProvider extends BaseProvider {
     constructor(dependencies: Dependencies = {}) {
         super();
         const environment = dependencies.environment ?? process.env;
-        this.enabled = environment.FRAMEX_ENABLED === 'true';
+        this.enabled = (environment.FRAMEX_ENABLED ?? 'true') === 'true';
         this.fetchImpl = dependencies.fetch ?? fetch;
         const allow = globalLeafSwitch(environment, this.id, 'allow');
         const deny = globalLeafSwitch(environment, this.id, 'deny');

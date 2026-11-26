@@ -78,7 +78,7 @@ function envFlag(name: string, defaultValue: boolean): boolean {
 export class VidKingProvider extends BaseProvider {
     readonly id = 'vidking';
     readonly name = 'VidKing';
-    readonly enabled = envFlag('VIDKING_ENABLED', false);
+    readonly enabled = envFlag('VIDKING_ENABLED', true);
     readonly BASE_URL: string;
     readonly FRONTEND_URL: string;
     readonly HEADERS: Record<string, string>;

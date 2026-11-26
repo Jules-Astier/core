@@ -26,7 +26,7 @@ type PoprDependencies = {
 export class PoprProvider extends BaseProvider {
     readonly id = 'popr';
     readonly name = 'Popr';
-    readonly enabled = process.env.POPR_ENABLED === 'true';
+    readonly enabled = (process.env.POPR_ENABLED ?? 'true') === 'true';
     readonly BASE_URL = 'https://popr.ink';
     readonly HEADERS = {
         'User-Agent':

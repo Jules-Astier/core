@@ -20,8 +20,11 @@ const { assertProviderResultContract } = (await import(contractModulePath)) as {
 };
 
 const BASE_URL = 'https://vixsrc.invalid';
+const PUBLIC_BASE_URL = 'https://vixsrc.to';
+const HEADLESSVIDX_BASE_URL = 'http://headlessvidx:3202';
 const NOW = 1_700_000_000_000;
 const EXPIRES = '2000000000';
+const PUBLIC_MASTER_URL = `${PUBLIC_BASE_URL}/playlist/fixture?lang=en&token=fixture%2Btoken&expires=${EXPIRES}`;
 
 const movie = {
     type: 'movie',
@@ -259,4 +262,193 @@ test('rejects a malformed HLS response with diagnostics', async () => {
     const result = await overridden.getMovieSources(movie);
     assert.equal(result.sources.length, 0);
     assert.match(result.diagnostics[0].message, /malformed/);
+});
+
+function publicPlayerFixture(
+    playerResponse: () => Response,
+    baseUrl = PUBLIC_BASE_URL
+) {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const provider = new VixSrcProvider({
+        baseUrl,
+        headlessVidXBaseUrl: HEADLESSVIDX_BASE_URL,
+        resolutionMode: 'public-player',
+        now: () => NOW,
+        fetch: async (input, init) => {
+            const url = String(input);
+            calls.push({ url, init });
+            if (url === `${HEADLESSVIDX_BASE_URL}/public-player/vixsrc`) {
+                return playerResponse();
+            }
+            assert.equal(url, PUBLIC_MASTER_URL);
+            return new Response(manifest.replaceAll(BASE_URL, PUBLIC_BASE_URL));
+        }
+    });
+    return { provider, calls };
+}
+
+test('sends TV and movie identities to the public player and returns direct HLS', async () => {
+    const { provider, calls } = publicPlayerFixture(() =>
+        Response.json({
+            status: 'resolved',
+            playlistUrl: PUBLIC_MASTER_URL
+        })
+    );
+
+    const result = await provider.getTVSources(episode);
+    assertProviderResultContract(result, {
+        providerId: 'vixsrc',
+        allowedTypes: ['hls']
+    });
+    assert.equal(result.sources[0].quality, '1080p');
+    assert.equal(result.subtitles.length, 1);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].init?.method, 'POST');
+    assert.equal(calls[0].init?.redirect, 'error');
+    assert.ok(calls[0].init?.signal);
+    assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+        tmdbId: '1396',
+        season: 1,
+        episode: 1
+    });
+    const payload = proxyPayload(result.sources[0].url);
+    assert.equal(calls[1].url, PUBLIC_MASTER_URL);
+    assert.equal(calls[1].init?.redirect, 'error');
+    assert.equal(payload.url, PUBLIC_MASTER_URL);
+    assert.deepEqual(calls[1].init?.headers, payload.headers);
+    assert.deepEqual(Object.keys(payload.headers), ['Accept']);
+
+    await provider.getMovieSources(movie);
+    assert.deepEqual(JSON.parse(String(calls[2].init?.body)), {
+        tmdbId: '786892'
+    });
+});
+
+test('defaults to enabled and chooses the sidecar only for the stock origin', async () => {
+    const shared = { CINEPRO_HEADLESSVIDX_BASE_URL: HEADLESSVIDX_BASE_URL };
+    const cases = [
+        { environment: {}, expected: `${PUBLIC_BASE_URL}/api/tv/1396/1/1` },
+        {
+            environment: shared,
+            expected: `${HEADLESSVIDX_BASE_URL}/public-player/vixsrc`
+        },
+        {
+            environment: { ...shared, VIXSRC_RESOLUTION_MODE: 'legacy' },
+            expected: `${PUBLIC_BASE_URL}/api/tv/1396/1/1`
+        },
+        {
+            environment: { ...shared, VIXSRC_BASE_URL: BASE_URL },
+            expected: `${BASE_URL}/api/tv/1396/1/1`
+        },
+        {
+            environment: { ...shared, VIXSRC_HEADLESSVIDX_BASE_URL: '' },
+            expected: `${PUBLIC_BASE_URL}/api/tv/1396/1/1`
+        },
+        {
+            environment: {
+                ...shared,
+                VIXSRC_HEADLESSVIDX_BASE_URL: 'http://dedicated.example'
+            },
+            expected: 'http://dedicated.example/public-player/vixsrc'
+        }
+    ];
+    for (const { environment, expected } of cases) {
+        const calls: string[] = [];
+        const provider = new VixSrcProvider({
+            environment,
+            fetch: async (input) => {
+                calls.push(String(input));
+                return new Response('', { status: 404 });
+            }
+        });
+        assert.equal(provider.enabled, true);
+        await provider.getTVSources(episode);
+        assert.deepEqual(calls, [expected]);
+    }
+    assert.equal(
+        new VixSrcProvider({
+            environment: { ...shared, VIXSRC_ENABLED: 'false' }
+        }).enabled,
+        false
+    );
+});
+
+test('checks the selected sidecar without probing the legacy origin', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const provider = new VixSrcProvider({
+        environment: { CINEPRO_HEADLESSVIDX_BASE_URL: HEADLESSVIDX_BASE_URL },
+        fetch: async (input, init) => {
+            calls.push({ url: String(input), init });
+            return new Response(null, { status: 200 });
+        }
+    });
+    assert.equal(await provider.healthCheck(), true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `${HEADLESSVIDX_BASE_URL}/healthz`);
+    assert.equal(calls[0].init?.method, 'HEAD');
+    assert.equal(calls[0].init?.redirect, 'error');
+});
+
+test('does not fall back to the legacy API when the public player fails', async () => {
+    for (const [response, diagnostic] of [
+        [() => Response.json({ status: 'blocked' }), /blocked/],
+        [() => new Response('do-not-log', { status: 403 }), /blocked \(403\)/],
+        [() => Response.json({ status: 'not-found' }), /media was not found/],
+        [() => Response.json({ status: 'unavailable' }), /unavailable/],
+        [() => new Response('<html>not JSON</html>'), /malformed/],
+        [
+            () =>
+                Response.json({
+                    status: 'resolved',
+                    playlistUrl: 'x'.repeat(17_000)
+                }),
+            /too large/
+        ]
+    ] as const) {
+        const { provider, calls } = publicPlayerFixture(response);
+        const result = await provider.getTVSources(episode);
+        assert.deepEqual(result.sources, []);
+        assert.equal(calls.length, 1);
+        assert.match(result.diagnostics[0].message, diagnostic);
+        assert.doesNotMatch(result.diagnostics[0].message, /do-not-log/);
+    }
+});
+
+test('rejects unsafe or expired playlist URLs before fetching media', async () => {
+    for (const playlistUrl of [
+        PUBLIC_MASTER_URL.replace('vixsrc.to', 'untrusted.invalid'),
+        PUBLIC_MASTER_URL.replace('https:', 'http:'),
+        PUBLIC_MASTER_URL.replace('/playlist/', '/embed/'),
+        PUBLIC_MASTER_URL.replace('/playlist/', '/playlist/%2e%2e/tv/'),
+        PUBLIC_MASTER_URL.replace('vixsrc.to', 'user@vixsrc.to'),
+        PUBLIC_MASTER_URL.replace(EXPIRES, '1'),
+        PUBLIC_MASTER_URL.replace(`&expires=${EXPIRES}`, ''),
+        `${PUBLIC_MASTER_URL}&expires=${EXPIRES}`,
+        `${PUBLIC_MASTER_URL}&padding=${'X'.repeat(4_096)}`
+    ]) {
+        const { provider, calls } = publicPlayerFixture(() =>
+            Response.json({ status: 'resolved', playlistUrl })
+        );
+        assert.deepEqual((await provider.getTVSources(episode)).sources, []);
+        assert.equal(calls.length, 1);
+    }
+});
+
+test('rejects invalid public player identities and custom origins', async () => {
+    const publicPlayer = publicPlayerFixture(() => Response.json({}));
+    const result = await publicPlayer.provider.getTVSources({
+        ...episode,
+        e: 0
+    });
+    assert.match(result.diagnostics[0].message, /valid season and episode/);
+    assert.deepEqual(publicPlayer.calls, []);
+
+    const customOrigin = publicPlayerFixture(() => Response.json({}), BASE_URL);
+    const customOriginResult =
+        await customOrigin.provider.getTVSources(episode);
+    assert.match(
+        customOriginResult.diagnostics[0].message,
+        /default VIXSRC_BASE_URL/
+    );
+    assert.deepEqual(customOrigin.calls, []);
 });
