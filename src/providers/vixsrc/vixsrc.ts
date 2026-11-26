@@ -7,6 +7,11 @@ import type {
     Subtitle
 } from '@omss/framework';
 import type { VixSrcApiResponse } from './vixsrc.types.js';
+import {
+    fetchPublicPlayerEmbed,
+    VixSrcPlayerError,
+    type VixSrcPlayerEmbed
+} from './vixsrc.player.js';
 
 const DEFAULT_BASE_URL = 'https://vixsrc.to';
 
@@ -14,6 +19,8 @@ type VixSrcDependencies = {
     readonly fetch?: typeof fetch;
     readonly baseUrl?: string;
     readonly now?: () => number;
+    readonly resolutionMode?: string;
+    readonly headlessVidXBaseUrl?: string;
 };
 
 type MasterPlaylistData = {
@@ -51,6 +58,8 @@ export class VixSrcProvider extends BaseProvider {
 
     private readonly fetchImpl: typeof fetch;
     private readonly now: () => number;
+    private readonly usePublicPlayer: boolean;
+    private readonly headlessVidXBaseUrl?: string;
 
     constructor(dependencies: VixSrcDependencies = {}) {
         super();
@@ -69,6 +78,12 @@ export class VixSrcProvider extends BaseProvider {
         };
         this.fetchImpl = dependencies.fetch ?? fetch;
         this.now = dependencies.now ?? Date.now;
+        this.usePublicPlayer =
+            (dependencies.resolutionMode ??
+                process.env.VIXSRC_RESOLUTION_MODE) === 'public-player';
+        this.headlessVidXBaseUrl =
+            dependencies.headlessVidXBaseUrl ??
+            process.env.VIXSRC_HEADLESSVIDX_BASE_URL;
     }
 
     async getMovieSources(media: ProviderMediaObject): Promise<ProviderResult> {
@@ -83,23 +98,12 @@ export class VixSrcProvider extends BaseProvider {
         media: ProviderMediaObject
     ): Promise<ProviderResult> {
         try {
-            const apiUrl = this.buildApiUrl(media);
-            const embedPath = await this.fetchEmbedPath(apiUrl);
-            if (!embedPath) {
+            const embed = await this.loadEmbed(media);
+            if (!embed) {
                 return this.emptyResult('media was not found');
             }
 
-            const embedUrl = this.resolveEmbedUrl(embedPath);
-            const html = await this.fetchText(
-                embedUrl,
-                {
-                    ...this.HEADERS,
-                    Accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
-                    Referer: apiUrl
-                },
-                'embed'
-            );
-            const masterData = this.extractMasterPlaylistData(html);
+            const masterData = this.extractMasterPlaylistData(embed.html);
             if (!masterData || this.isTokenExpired(masterData.expires)) {
                 return this.emptyResult(
                     'embed response did not contain a current playlist'
@@ -108,9 +112,11 @@ export class VixSrcProvider extends BaseProvider {
 
             const masterUrl = this.buildMasterUrl(masterData);
             const playlistHeaders = {
-                ...this.HEADERS,
+                ...(this.usePublicPlayer
+                    ? { Origin: this.BASE_URL }
+                    : this.HEADERS),
                 Accept: 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                Referer: embedUrl
+                Referer: embed.url
             };
             const manifest = await this.fetchText(
                 masterUrl,
@@ -120,6 +126,9 @@ export class VixSrcProvider extends BaseProvider {
 
             return this.parseManifest(manifest, masterUrl, playlistHeaders);
         } catch (error) {
+            if (error instanceof VixSrcPlayerError) {
+                return this.emptyResult(error.message);
+            }
             if (
                 error instanceof VixSrcHttpError &&
                 [401, 403, 429].includes(error.status)
@@ -145,6 +154,41 @@ export class VixSrcProvider extends BaseProvider {
         return `${this.BASE_URL}/api/tv/${encodeURIComponent(media.tmdbId)}/${media.s}/${media.e}`;
     }
 
+    private async loadEmbed(
+        media: ProviderMediaObject
+    ): Promise<VixSrcPlayerEmbed | null> {
+        if (this.usePublicPlayer) {
+            if (this.BASE_URL !== DEFAULT_BASE_URL) {
+                throw new VixSrcPlayerError(
+                    'public-player mode requires the default VIXSRC_BASE_URL'
+                );
+            }
+            const embed = await fetchPublicPlayerEmbed(
+                this.headlessVidXBaseUrl,
+                media,
+                this.fetchImpl
+            );
+            if (!embed) return null;
+            return { url: this.resolveEmbedUrl(embed.url), html: embed.html };
+        }
+
+        const apiUrl = this.buildApiUrl(media);
+        const embedPath = await this.fetchEmbedPath(apiUrl);
+        if (!embedPath) return null;
+
+        const url = this.resolveEmbedUrl(embedPath);
+        const html = await this.fetchText(
+            url,
+            {
+                ...this.HEADERS,
+                Accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
+                Referer: apiUrl
+            },
+            'embed'
+        );
+        return { url, html };
+    }
+
     private async fetchEmbedPath(url: string): Promise<string | null> {
         const response = await this.fetchImpl(url, { headers: this.HEADERS });
         if (response.status === 404) return null;
@@ -161,7 +205,13 @@ export class VixSrcProvider extends BaseProvider {
         headers: Record<string, string>,
         phase: Exclude<VixSrcRequestPhase, 'API'>
     ): Promise<string> {
-        const response = await this.fetchImpl(url, { headers });
+        const response = await this.fetchImpl(url, {
+            headers,
+            ...(this.usePublicPlayer && {
+                redirect: 'error',
+                signal: AbortSignal.timeout(5_000)
+            })
+        });
         if (!response.ok) throw new VixSrcHttpError(phase, response.status);
         return response.text();
     }
@@ -169,7 +219,12 @@ export class VixSrcProvider extends BaseProvider {
     private resolveEmbedUrl(value: string): string {
         const url = new URL(value, `${this.BASE_URL}/`);
         const base = new URL(this.BASE_URL);
-        if (url.origin !== base.origin || !url.pathname.startsWith('/embed/')) {
+        if (
+            url.origin !== base.origin ||
+            url.username ||
+            url.password ||
+            !url.pathname.startsWith('/embed/')
+        ) {
             throw new TypeError('VixSrc returned an invalid embed URL');
         }
         return url.toString();

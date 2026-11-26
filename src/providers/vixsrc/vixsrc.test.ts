@@ -20,6 +20,8 @@ const { assertProviderResultContract } = (await import(contractModulePath)) as {
 };
 
 const BASE_URL = 'https://vixsrc.invalid';
+const PUBLIC_BASE_URL = 'https://vixsrc.to';
+const HEADLESSVIDX_BASE_URL = 'http://headlessvidx:3202';
 const NOW = 1_700_000_000_000;
 const EXPIRES = '2000000000';
 
@@ -259,4 +261,128 @@ test('rejects a malformed HLS response with diagnostics', async () => {
     const result = await overridden.getMovieSources(movie);
     assert.equal(result.sources.length, 0);
     assert.match(result.diagnostics[0].message, /malformed/);
+});
+
+function publicPlayerFixture(
+    playerResponse: () => Response,
+    baseUrl = PUBLIC_BASE_URL
+) {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const masterUrl = `${PUBLIC_BASE_URL}/playlist/fixture?token=fixture-token&expires=${EXPIRES}&h=1`;
+    const provider = new VixSrcProvider({
+        baseUrl,
+        headlessVidXBaseUrl: HEADLESSVIDX_BASE_URL,
+        resolutionMode: 'public-player',
+        now: () => NOW,
+        fetch: async (input, init) => {
+            const url = String(input);
+            calls.push({ url, init });
+            if (url === `${HEADLESSVIDX_BASE_URL}/public-player/vixsrc`) {
+                return playerResponse();
+            }
+            assert.equal(url, masterUrl);
+            return new Response(manifest.replaceAll(BASE_URL, PUBLIC_BASE_URL));
+        }
+    });
+    return { provider, calls, masterUrl };
+}
+
+test('sends TV and movie identities to the public player and returns direct HLS', async () => {
+    const embedUrl = `${PUBLIC_BASE_URL}/embed/fixture`;
+    const { provider, calls, masterUrl } = publicPlayerFixture(() =>
+        Response.json({
+            status: 'resolved',
+            embedUrl,
+            html: embedHtml.replaceAll(BASE_URL, PUBLIC_BASE_URL)
+        })
+    );
+
+    const result = await provider.getTVSources(episode);
+    assertProviderResultContract(result, {
+        providerId: 'vixsrc',
+        allowedTypes: ['hls']
+    });
+    assert.equal(result.sources[0].quality, '1080p');
+    assert.equal(result.subtitles.length, 1);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].init?.method, 'POST');
+    assert.equal(calls[0].init?.redirect, 'error');
+    assert.ok(calls[0].init?.signal);
+    assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+        tmdbId: '1396',
+        season: 1,
+        episode: 1
+    });
+    const payload = proxyPayload(result.sources[0].url);
+    assert.equal(calls[1].url, masterUrl);
+    assert.equal(payload.url, masterUrl);
+    assert.equal(payload.headers.Referer, embedUrl);
+    assert.equal(payload.headers.Origin, PUBLIC_BASE_URL);
+    assert.equal(payload.headers.Cookie, undefined);
+    assert.equal(payload.headers['User-Agent'], undefined);
+
+    await provider.getMovieSources(movie);
+    assert.deepEqual(JSON.parse(String(calls[2].init?.body)), {
+        tmdbId: '786892'
+    });
+});
+
+test('does not fall back to the legacy API when the public player fails', async () => {
+    for (const [response, diagnostic] of [
+        [() => Response.json({ status: 'blocked' }), /blocked/],
+        [() => new Response('do-not-log', { status: 403 }), /blocked \(403\)/],
+        [() => Response.json({ status: 'not-found' }), /media was not found/],
+        [() => Response.json({ status: 'unavailable' }), /unavailable/],
+        [() => new Response('<html>not JSON</html>'), /malformed/],
+        [
+            () =>
+                Response.json({
+                    status: 'resolved',
+                    html: 'x'.repeat(600_000)
+                }),
+            /too large/
+        ]
+    ] as const) {
+        const { provider, calls } = publicPlayerFixture(response);
+        const result = await provider.getTVSources(episode);
+        assert.deepEqual(result.sources, []);
+        assert.equal(calls.length, 1);
+        assert.match(result.diagnostics[0].message, diagnostic);
+        assert.doesNotMatch(result.diagnostics[0].message, /do-not-log/);
+    }
+});
+
+test('rejects an untrusted embed URL or an invalid public player identity before fetching media', async () => {
+    for (const url of [
+        'https://untrusted.invalid/embed/fixture',
+        `${PUBLIC_BASE_URL}/tv/1396/1/1`,
+        `${PUBLIC_BASE_URL}/embed/../tv/1396/1/1`
+    ]) {
+        const { provider, calls } = publicPlayerFixture(() =>
+            Response.json({
+                status: 'resolved',
+                embedUrl: url,
+                html: embedHtml
+            })
+        );
+        assert.deepEqual((await provider.getTVSources(episode)).sources, []);
+        assert.equal(calls.length, 1);
+    }
+
+    const publicPlayer = publicPlayerFixture(() => Response.json({}));
+    const result = await publicPlayer.provider.getTVSources({
+        ...episode,
+        e: 0
+    });
+    assert.match(result.diagnostics[0].message, /valid season and episode/);
+    assert.deepEqual(publicPlayer.calls, []);
+
+    const customOrigin = publicPlayerFixture(() => Response.json({}), BASE_URL);
+    const customOriginResult =
+        await customOrigin.provider.getTVSources(episode);
+    assert.match(
+        customOriginResult.diagnostics[0].message,
+        /default VIXSRC_BASE_URL/
+    );
+    assert.deepEqual(customOrigin.calls, []);
 });
