@@ -24,6 +24,7 @@ const PUBLIC_BASE_URL = 'https://vixsrc.to';
 const HEADLESSVIDX_BASE_URL = 'http://headlessvidx:3202';
 const NOW = 1_700_000_000_000;
 const EXPIRES = '2000000000';
+const PUBLIC_MASTER_URL = `${PUBLIC_BASE_URL}/playlist/fixture?lang=en&token=fixture%2Btoken&expires=${EXPIRES}`;
 
 const movie = {
     type: 'movie',
@@ -268,7 +269,6 @@ function publicPlayerFixture(
     baseUrl = PUBLIC_BASE_URL
 ) {
     const calls: { url: string; init?: RequestInit }[] = [];
-    const masterUrl = `${PUBLIC_BASE_URL}/playlist/fixture?token=fixture-token&expires=${EXPIRES}&h=1`;
     const provider = new VixSrcProvider({
         baseUrl,
         headlessVidXBaseUrl: HEADLESSVIDX_BASE_URL,
@@ -280,20 +280,18 @@ function publicPlayerFixture(
             if (url === `${HEADLESSVIDX_BASE_URL}/public-player/vixsrc`) {
                 return playerResponse();
             }
-            assert.equal(url, masterUrl);
+            assert.equal(url, PUBLIC_MASTER_URL);
             return new Response(manifest.replaceAll(BASE_URL, PUBLIC_BASE_URL));
         }
     });
-    return { provider, calls, masterUrl };
+    return { provider, calls };
 }
 
 test('sends TV and movie identities to the public player and returns direct HLS', async () => {
-    const embedUrl = `${PUBLIC_BASE_URL}/embed/fixture`;
-    const { provider, calls, masterUrl } = publicPlayerFixture(() =>
+    const { provider, calls } = publicPlayerFixture(() =>
         Response.json({
             status: 'resolved',
-            embedUrl,
-            html: embedHtml.replaceAll(BASE_URL, PUBLIC_BASE_URL)
+            playlistUrl: PUBLIC_MASTER_URL
         })
     );
 
@@ -314,12 +312,11 @@ test('sends TV and movie identities to the public player and returns direct HLS'
         episode: 1
     });
     const payload = proxyPayload(result.sources[0].url);
-    assert.equal(calls[1].url, masterUrl);
-    assert.equal(payload.url, masterUrl);
-    assert.equal(payload.headers.Referer, embedUrl);
-    assert.equal(payload.headers.Origin, PUBLIC_BASE_URL);
-    assert.equal(payload.headers.Cookie, undefined);
-    assert.equal(payload.headers['User-Agent'], undefined);
+    assert.equal(calls[1].url, PUBLIC_MASTER_URL);
+    assert.equal(calls[1].init?.redirect, 'error');
+    assert.equal(payload.url, PUBLIC_MASTER_URL);
+    assert.deepEqual(calls[1].init?.headers, payload.headers);
+    assert.deepEqual(Object.keys(payload.headers), ['Accept']);
 
     await provider.getMovieSources(movie);
     assert.deepEqual(JSON.parse(String(calls[2].init?.body)), {
@@ -338,7 +335,7 @@ test('does not fall back to the legacy API when the public player fails', async 
             () =>
                 Response.json({
                     status: 'resolved',
-                    html: 'x'.repeat(600_000)
+                    playlistUrl: 'x'.repeat(17_000)
                 }),
             /too large/
         ]
@@ -352,23 +349,27 @@ test('does not fall back to the legacy API when the public player fails', async 
     }
 });
 
-test('rejects an untrusted embed URL or an invalid public player identity before fetching media', async () => {
-    for (const url of [
-        'https://untrusted.invalid/embed/fixture',
-        `${PUBLIC_BASE_URL}/tv/1396/1/1`,
-        `${PUBLIC_BASE_URL}/embed/../tv/1396/1/1`
+test('rejects unsafe or expired playlist URLs before fetching media', async () => {
+    for (const playlistUrl of [
+        PUBLIC_MASTER_URL.replace('vixsrc.to', 'untrusted.invalid'),
+        PUBLIC_MASTER_URL.replace('https:', 'http:'),
+        PUBLIC_MASTER_URL.replace('/playlist/', '/embed/'),
+        PUBLIC_MASTER_URL.replace('/playlist/', '/playlist/%2e%2e/tv/'),
+        PUBLIC_MASTER_URL.replace('vixsrc.to', 'user@vixsrc.to'),
+        PUBLIC_MASTER_URL.replace(EXPIRES, '1'),
+        PUBLIC_MASTER_URL.replace(`&expires=${EXPIRES}`, ''),
+        `${PUBLIC_MASTER_URL}&expires=${EXPIRES}`,
+        `${PUBLIC_MASTER_URL}&padding=${'X'.repeat(4_096)}`
     ]) {
         const { provider, calls } = publicPlayerFixture(() =>
-            Response.json({
-                status: 'resolved',
-                embedUrl: url,
-                html: embedHtml
-            })
+            Response.json({ status: 'resolved', playlistUrl })
         );
         assert.deepEqual((await provider.getTVSources(episode)).sources, []);
         assert.equal(calls.length, 1);
     }
+});
 
+test('rejects invalid public player identities and custom origins', async () => {
     const publicPlayer = publicPlayerFixture(() => Response.json({}));
     const result = await publicPlayer.provider.getTVSources({
         ...episode,

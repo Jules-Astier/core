@@ -1,17 +1,17 @@
 import type { ProviderMediaObject } from '@omss/framework';
 
-const MAX_RESPONSE_BYTES = 512 * 1024;
+const MAX_PLAYLIST_URL_LENGTH = 4_096;
+const MAX_RESPONSE_BYTES = 16 * 1024;
 const PLAYER_TIMEOUT_MS = 15_000;
-
-export type VixSrcPlayerEmbed = { url: string; html: string };
 
 export class VixSrcPlayerError extends Error {}
 
-export async function fetchPublicPlayerEmbed(
+export async function fetchPublicPlayerPlaylist(
     baseUrl: string | undefined,
     media: ProviderMediaObject,
-    fetchImpl: typeof fetch
-): Promise<VixSrcPlayerEmbed | null> {
+    fetchImpl: typeof fetch,
+    now: () => number
+): Promise<string | null> {
     const service = baseUrl && URL.parse(baseUrl);
     if (
         !service ||
@@ -81,21 +81,43 @@ export async function fetchPublicPlayerEmbed(
     if (body?.status === 'unavailable') {
         throw new VixSrcPlayerError('public player service was unavailable');
     }
-    if (
-        body?.status !== 'resolved' ||
-        typeof body.embedUrl !== 'string' ||
-        !URL.parse(body.embedUrl) ||
-        typeof body.html !== 'string' ||
-        !body.html.trim()
-    ) {
+    if (body?.status !== 'resolved' || typeof body.playlistUrl !== 'string') {
         throw new VixSrcPlayerError('public player response was malformed');
     }
-    return { url: body.embedUrl, html: body.html };
+    const value = body.playlistUrl;
+    const url =
+        value.length <= MAX_PLAYLIST_URL_LENGTH && /^[\x21-\x7e]+$/.test(value)
+            ? URL.parse(value)
+            : null;
+    if (
+        !url ||
+        url.origin !== 'https://vixsrc.to' ||
+        url.username ||
+        url.password ||
+        url.hash ||
+        !/^\/playlist\/[A-Za-z0-9_-]+\/?$/.test(url.pathname)
+    ) {
+        throw new VixSrcPlayerError(
+            'public player returned an invalid playlist URL'
+        );
+    }
+    const expires = url.searchParams.getAll('expires');
+    if (
+        expires.length !== 1 ||
+        !/^\d{1,12}$/.test(expires[0]) ||
+        Number(expires[0]) * 1_000 <= now()
+    ) {
+        throw new VixSrcPlayerError(
+            'public player playlist was expired or missing expiry'
+        );
+    }
+    // Preserve the URL issued by the player. Its query parameters are opaque.
+    return value;
 }
 
 async function readPlayerResponse(
     response: Response
-): Promise<{ status?: unknown; embedUrl?: unknown; html?: unknown } | null> {
+): Promise<{ status?: unknown; playlistUrl?: unknown } | null> {
     const contentType = response.headers.get('content-type')?.split(';')[0];
     if (
         contentType?.trim().toLowerCase() !== 'application/json' ||

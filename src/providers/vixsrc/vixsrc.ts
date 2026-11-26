@@ -8,12 +8,14 @@ import type {
 } from '@omss/framework';
 import type { VixSrcApiResponse } from './vixsrc.types.js';
 import {
-    fetchPublicPlayerEmbed,
-    VixSrcPlayerError,
-    type VixSrcPlayerEmbed
+    fetchPublicPlayerPlaylist,
+    VixSrcPlayerError
 } from './vixsrc.player.js';
 
 const DEFAULT_BASE_URL = 'https://vixsrc.to';
+const PLAYLIST_ACCEPT =
+    'application/vnd.apple.mpegurl,application/x-mpegURL,*/*';
+type PlaylistRequest = { url: string; headers: Record<string, string> };
 
 type VixSrcDependencies = {
     readonly fetch?: typeof fetch;
@@ -98,33 +100,18 @@ export class VixSrcProvider extends BaseProvider {
         media: ProviderMediaObject
     ): Promise<ProviderResult> {
         try {
-            const embed = await this.loadEmbed(media);
-            if (!embed) {
+            const playlist = await (this.usePublicPlayer
+                ? this.loadPublicPlaylist(media)
+                : this.loadLegacyPlaylist(media));
+            if (!playlist) {
                 return this.emptyResult('media was not found');
             }
-
-            const masterData = this.extractMasterPlaylistData(embed.html);
-            if (!masterData || this.isTokenExpired(masterData.expires)) {
-                return this.emptyResult(
-                    'embed response did not contain a current playlist'
-                );
-            }
-
-            const masterUrl = this.buildMasterUrl(masterData);
-            const playlistHeaders = {
-                ...(this.usePublicPlayer
-                    ? { Origin: this.BASE_URL }
-                    : this.HEADERS),
-                Accept: 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                Referer: embed.url
-            };
             const manifest = await this.fetchText(
-                masterUrl,
-                playlistHeaders,
+                playlist.url,
+                playlist.headers,
                 'playlist'
             );
-
-            return this.parseManifest(manifest, masterUrl, playlistHeaders);
+            return this.parseManifest(manifest, playlist.url, playlist.headers);
         } catch (error) {
             if (error instanceof VixSrcPlayerError) {
                 return this.emptyResult(error.message);
@@ -154,24 +141,26 @@ export class VixSrcProvider extends BaseProvider {
         return `${this.BASE_URL}/api/tv/${encodeURIComponent(media.tmdbId)}/${media.s}/${media.e}`;
     }
 
-    private async loadEmbed(
+    private async loadPublicPlaylist(
         media: ProviderMediaObject
-    ): Promise<VixSrcPlayerEmbed | null> {
-        if (this.usePublicPlayer) {
-            if (this.BASE_URL !== DEFAULT_BASE_URL) {
-                throw new VixSrcPlayerError(
-                    'public-player mode requires the default VIXSRC_BASE_URL'
-                );
-            }
-            const embed = await fetchPublicPlayerEmbed(
-                this.headlessVidXBaseUrl,
-                media,
-                this.fetchImpl
+    ): Promise<PlaylistRequest | null> {
+        if (this.BASE_URL !== DEFAULT_BASE_URL) {
+            throw new VixSrcPlayerError(
+                'public-player mode requires the default VIXSRC_BASE_URL'
             );
-            if (!embed) return null;
-            return { url: this.resolveEmbedUrl(embed.url), html: embed.html };
         }
+        const url = await fetchPublicPlayerPlaylist(
+            this.headlessVidXBaseUrl,
+            media,
+            this.fetchImpl,
+            this.now
+        );
+        return url ? { url, headers: { Accept: PLAYLIST_ACCEPT } } : null;
+    }
 
+    private async loadLegacyPlaylist(
+        media: ProviderMediaObject
+    ): Promise<PlaylistRequest | null> {
         const apiUrl = this.buildApiUrl(media);
         const embedPath = await this.fetchEmbedPath(apiUrl);
         if (!embedPath) return null;
@@ -186,7 +175,16 @@ export class VixSrcProvider extends BaseProvider {
             },
             'embed'
         );
-        return { url, html };
+        const masterData = this.extractMasterPlaylistData(html);
+        if (!masterData || this.isTokenExpired(masterData.expires)) {
+            throw new VixSrcPlayerError(
+                'embed response did not contain a current playlist'
+            );
+        }
+        return {
+            url: this.buildMasterUrl(masterData),
+            headers: { ...this.HEADERS, Accept: PLAYLIST_ACCEPT, Referer: url }
+        };
     }
 
     private async fetchEmbedPath(url: string): Promise<string | null> {
