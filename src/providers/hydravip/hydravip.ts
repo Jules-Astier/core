@@ -280,7 +280,7 @@ function isRelayedVideoMaster(text: string, relay: URL): boolean {
     return (
         hasVideo &&
         targets.every((target) => {
-            const url = URL.parse(target, relay);
+            const url = URL.parse(target, relay.href);
             if (
                 !url ||
                 url.origin !== relay.origin ||
